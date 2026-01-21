@@ -15,8 +15,8 @@ env/
 dist/
 build/
 
-# Data (persisted locally, not in git)
-data/chroma_db/
+# Data
+# Note: chroma_db is included for deployment with pre-built vectors
 *.db
 
 # IDE
