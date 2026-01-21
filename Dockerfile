@@ -29,8 +29,8 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 
-# Create data directory for ChromaDB
-RUN mkdir -p /app/data/chroma_db
+# Copy pre-built ChromaDB with indexed vectors
+COPY data/ ./data/
 
 # Expose port (Railway will override with $PORT)
 EXPOSE ${PORT}
