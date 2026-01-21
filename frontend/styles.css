@@ -1,0 +1,155 @@
+/* Wellness Librarian - Custom Styles */
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #F5F0E8;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #d4cfc5;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #bbb5a8;
+}
+
+/* Prose styles for markdown content */
+.prose-brown {
+    --tw-prose-body: #4A3728;
+    --tw-prose-headings: #4A3728;
+    --tw-prose-links: #3D8B84;
+    --tw-prose-bold: #4A3728;
+    --tw-prose-counters: #6B5344;
+    --tw-prose-bullets: #6B5344;
+    --tw-prose-hr: #EDE6DA;
+    --tw-prose-quotes: #4A3728;
+    --tw-prose-quote-borders: #3D8B84;
+    --tw-prose-code: #4A3728;
+    --tw-prose-pre-code: #F5F0E8;
+    --tw-prose-pre-bg: #4A3728;
+}
+
+/* Animation for loading dots */
+@keyframes bounce {
+    0%, 80%, 100% {
+        transform: translateY(0);
+    }
+    40% {
+        transform: translateY(-6px);
+    }
+}
+
+.animate-bounce {
+    animation: bounce 1s ease-in-out infinite;
+}
+
+/* Focus styles */
+*:focus-visible {
+    outline: 2px solid #3D8B84;
+    outline-offset: 2px;
+}
+
+/* Message transitions */
+.message-enter {
+    opacity: 0;
+    transform: translateY(10px);
+}
+
+.message-enter-active {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Link styles in messages */
+.prose a {
+    color: #3D8B84;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.prose a:hover {
+    color: #2D6B66;
+}
+
+/* Code blocks */
+.prose code {
+    background: #EDE6DA;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+}
+
+.prose pre {
+    background: #4A3728;
+    color: #F5F0E8;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+}
+
+.prose pre code {
+    background: transparent;
+    padding: 0;
+}
+
+/* List styles */
+.prose ul {
+    list-style-type: disc;
+    padding-left: 1.25rem;
+}
+
+.prose ol {
+    list-style-type: decimal;
+    padding-left: 1.25rem;
+}
+
+.prose li {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+/* Blockquotes */
+.prose blockquote {
+    border-left: 3px solid #3D8B84;
+    padding-left: 1rem;
+    font-style: italic;
+    color: #6B5344;
+}
+
+/* Headings in responses */
+.prose h1, .prose h2, .prose h3, .prose h4 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    .prose {
+        font-size: 0.9375rem;
+    }
+}
+
+/* Print styles */
+@media print {
+    body {
+        background: white;
+    }
+
+    header, form {
+        display: none;
+    }
+}
