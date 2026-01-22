@@ -8,6 +8,7 @@ function chatApp() {
         messages: [],
         inputMessage: '',
         isLoading: false,
+        messageIdCounter: 0, // Unique ID counter for messages
         stats: {
             total_videos: 0,
             total_chunks: 0,
@@ -16,6 +17,11 @@ function chatApp() {
         async init() {
             // Load stats on init
             await this.loadStats();
+        },
+
+        // Generate unique message ID
+        generateMessageId() {
+            return `msg-${Date.now()}-${++this.messageIdCounter}`;
         },
 
         async loadStats() {
@@ -39,6 +45,7 @@ function chatApp() {
 
             // Add user message
             this.messages.push({
+                id: this.generateMessageId(),
                 role: 'user',
                 content: message,
             });
@@ -67,6 +74,7 @@ function chatApp() {
 
                 // Add assistant message
                 this.messages.push({
+                    id: this.generateMessageId(),
                     role: 'assistant',
                     content: data.response,
                     sources: data.sources,
@@ -77,6 +85,7 @@ function chatApp() {
 
                 // Add error message
                 this.messages.push({
+                    id: this.generateMessageId(),
                     role: 'assistant',
                     content: "I apologize, but I'm having trouble connecting to the library right now. Please try again in a moment.",
                     sources: [],

@@ -43,13 +43,15 @@
 <body class="bg-cream min-h-screen font-sans text-brown">
     <div x-data="chatApp()" class="flex flex-col h-screen">
         <!-- Header -->
-        <header class="bg-white/80 backdrop-blur-sm border-b border-cream-dark px-4 py-4 shadow-sm">
+        <header class="header-gradient border-b border-cream-dark/50 px-4 py-4">
             <div class="max-w-4xl mx-auto flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 bg-teal rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-                        </svg>
+                    <div class="header-logo-wrapper">
+                        <div class="w-11 h-11 bg-gradient-to-br from-teal to-teal-dark rounded-full flex items-center justify-center shadow-md">
+                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21c-1.5-1.5-3-4-3-7 0-2 1-4 3-5m0 12c1.5-1.5 3-4 3-7 0-2-1-4-3-5m0 12V9m-6 6c-.5-2 0-4 1.5-5.5S11 8 12 9m0 0c1-.5 3-1 4.5.5S18 13 18 15"></path>
+                            </svg>
+                        </div>
                     </div>
                     <div>
                         <h1 class="font-serif text-xl font-semibold text-brown">Wellness Librarian</h1>
@@ -58,10 +60,13 @@
                 </div>
 
                 <!-- Stats badge -->
-                <div x-show="stats.total_chunks > 0" class="hidden sm:flex items-center gap-2 text-sm text-brown-light">
+                <div x-show="stats.total_chunks > 0" class="hidden sm:flex items-center gap-2 stats-badge">
+                    <svg class="w-4 h-4 text-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+                    </svg>
                     <span x-text="stats.total_videos + ' videos'"></span>
-                    <span class="text-cream-dark">•</span>
-                    <span x-text="stats.total_chunks + ' indexed'"></span>
+                    <span class="text-teal/40">•</span>
+                    <span x-text="stats.total_chunks + ' segments'"></span>
                 </div>
             </div>
         </header>
@@ -76,45 +81,65 @@
                 >
                     <!-- Welcome message -->
                     <template x-if="messages.length === 0">
-                        <div class="text-center py-12">
-                            <div class="w-20 h-20 bg-teal/10 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <svg class="w-10 h-10 text-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-                                </svg>
+                        <div class="welcome-container text-center py-12 relative">
+                            <!-- Decorative leaf elements -->
+                            <div class="decorative-leaf decorative-leaf-left"></div>
+                            <div class="decorative-leaf decorative-leaf-right"></div>
+
+                            <!-- Welcome icon - warm lotus/wellness symbol -->
+                            <div class="welcome-icon-wrapper mx-auto mb-6">
+                                <div class="welcome-icon-glow"></div>
+                                <div class="w-24 h-24 bg-gradient-to-br from-teal to-teal-dark rounded-full flex items-center justify-center relative z-10 shadow-lg">
+                                    <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <!-- Lotus/wellness inspired icon -->
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21c-1.5-1.5-3-4-3-7 0-2 1-4 3-5m0 12c1.5-1.5 3-4 3-7 0-2-1-4-3-5m0 12V9m-6 6c-.5-2 0-4 1.5-5.5S11 8 12 9m0 0c1-.5 3-1 4.5.5S18 13 18 15M6 12c-1.5-.5-3 0-4 2m16-2c1.5-.5 3 0 4 2"></path>
+                                    </svg>
+                                </div>
                             </div>
-                            <h2 class="font-serif text-2xl font-semibold text-brown mb-3">Welcome to the Wellness Librarian</h2>
-                            <p class="text-brown-light max-w-md mx-auto mb-8">
-                                I'm here to help you discover relevant videos and insights from the Wellness Evolution Community library.
+
+                            <h2 class="font-serif text-3xl font-semibold text-brown mb-3">Welcome to the Wellness Librarian</h2>
+                            <p class="text-brown-light max-w-lg mx-auto mb-4">
+                                Your personal guide to discovering wisdom from the Wellness Evolution Community video library.
                             </p>
-                            <div class="flex flex-wrap justify-center gap-2">
+                            <p class="text-sm text-brown-light/80 max-w-md mx-auto mb-8">
+                                Ask me anything about meditation, nutrition, breathwork, and holistic wellness practices.
+                            </p>
+
+                            <div class="flex flex-wrap justify-center gap-3">
                                 <button
                                     @click="askQuestion('What videos discuss meditation techniques?')"
-                                    class="px-4 py-2 bg-white border border-cream-dark rounded-full text-sm text-brown hover:bg-cream-dark transition-colors"
+                                    class="suggestion-pill group"
                                 >
-                                    🧘 Meditation techniques
+                                    <span class="suggestion-pill-icon">🧘</span>
+                                    <span>Meditation techniques</span>
                                 </button>
                                 <button
                                     @click="askQuestion('Tell me about gut health content')"
-                                    class="px-4 py-2 bg-white border border-cream-dark rounded-full text-sm text-brown hover:bg-cream-dark transition-colors"
+                                    class="suggestion-pill group"
                                 >
-                                    🌿 Gut health
+                                    <span class="suggestion-pill-icon">🌿</span>
+                                    <span>Gut health</span>
                                 </button>
                                 <button
                                     @click="askQuestion('What breathing exercises are covered?')"
-                                    class="px-4 py-2 bg-white border border-cream-dark rounded-full text-sm text-brown hover:bg-cream-dark transition-colors"
+                                    class="suggestion-pill group"
                                 >
-                                    💨 Breathing exercises
+                                    <span class="suggestion-pill-icon">💨</span>
+                                    <span>Breathing exercises</span>
                                 </button>
                             </div>
                         </div>
                     </template>
 
                     <!-- Message list -->
-                    <template x-for="(msg, index) in messages" :key="index">
-                        <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                    <template x-for="(msg, index) in messages" :key="msg.id || index">
+                        <div
+                            :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
+                            x-init="$el.classList.add('message-animate')"
+                        >
                             <div :class="msg.role === 'user'
-                                ? 'bg-teal text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[85%] sm:max-w-[70%]'
-                                : 'bg-white border border-cream-dark rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%] sm:max-w-[80%] shadow-sm'"
+                                ? 'message-user'
+                                : 'message-assistant'"
                             >
                                 <!-- Message content -->
                                 <div
@@ -125,19 +150,27 @@
 
                                 <!-- Sources -->
                                 <template x-if="msg.sources && msg.sources.length > 0">
-                                    <div class="mt-4 pt-3 border-t border-cream-dark">
-                                        <p class="text-xs font-medium text-brown-light mb-2">Sources:</p>
-                                        <div class="space-y-1">
+                                    <div class="sources-container mt-4 pt-3 border-t border-cream-dark/50">
+                                        <p class="text-xs font-medium text-brown-light mb-2 flex items-center gap-1">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+                                            </svg>
+                                            Sources:
+                                        </p>
+                                        <div class="space-y-2">
                                             <template x-for="source in msg.sources" :key="source.vimeo_id">
                                                 <a
                                                     :href="source.vimeo_url"
                                                     target="_blank"
                                                     rel="noopener"
-                                                    class="block text-xs text-teal hover:text-teal-dark"
+                                                    class="source-card"
                                                 >
-                                                    <span x-text="source.title"></span>
-                                                    <span class="text-brown-light" x-text="'(' + source.category + ')'"></span>
-                                                    <span class="text-brown-light" x-text="'[' + source.duration + ']'"></span>
+                                                    <span class="source-title" x-text="source.title"></span>
+                                                    <span class="source-meta">
+                                                        <span x-text="source.category"></span>
+                                                        <span class="text-teal/40">•</span>
+                                                        <span x-text="source.duration"></span>
+                                                    </span>
                                                 </a>
                                             </template>
                                         </div>
@@ -149,13 +182,13 @@
 
                     <!-- Loading indicator -->
                     <template x-if="isLoading">
-                        <div class="flex justify-start">
-                            <div class="bg-white border border-cream-dark rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
-                                <div class="flex items-center gap-2 text-brown-light">
-                                    <div class="flex gap-1">
-                                        <span class="w-2 h-2 bg-teal rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-                                        <span class="w-2 h-2 bg-teal rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-                                        <span class="w-2 h-2 bg-teal rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                        <div class="flex justify-start message-animate">
+                            <div class="message-assistant">
+                                <div class="flex items-center gap-3 text-brown-light">
+                                    <div class="loading-dots">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
                                     </div>
                                     <span class="text-sm">Searching the library...</span>
                                 </div>
@@ -165,20 +198,20 @@
                 </div>
 
                 <!-- Input area -->
-                <div class="border-t border-cream-dark bg-white/80 backdrop-blur-sm p-4">
+                <div class="input-area-gradient border-t border-cream-dark/50 p-4">
                     <form @submit.prevent="sendMessage" class="max-w-4xl mx-auto">
                         <div class="flex gap-3">
                             <input
                                 x-model="inputMessage"
                                 type="text"
                                 placeholder="Ask about the wellness video library..."
-                                class="flex-1 px-4 py-3 bg-cream border border-cream-dark rounded-xl focus:outline-none focus:ring-2 focus:ring-teal/50 focus:border-teal text-brown placeholder-brown-light"
+                                class="chat-input flex-1 px-5 py-3 bg-white border border-cream-dark rounded-full focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal text-brown placeholder-brown-light/70 shadow-sm"
                                 :disabled="isLoading"
                             >
                             <button
                                 type="submit"
                                 :disabled="!inputMessage.trim() || isLoading"
-                                class="px-6 py-3 bg-teal text-white rounded-xl font-medium hover:bg-teal-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                class="send-button px-6 py-3 bg-gradient-to-r from-teal to-teal-dark text-white rounded-full font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                             >
                                 <span class="hidden sm:inline">Send</span>
                                 <svg class="w-5 h-5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
