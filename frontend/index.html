@@ -47,11 +47,7 @@
             <div class="max-w-4xl mx-auto flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <div class="header-logo-wrapper">
-                        <div class="w-11 h-11 bg-gradient-to-br from-teal to-teal-dark rounded-full flex items-center justify-center shadow-md">
-                            <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21c-1.5-1.5-3-4-3-7 0-2 1-4 3-5m0 12c1.5-1.5 3-4 3-7 0-2-1-4-3-5m0 12V9m-6 6c-.5-2 0-4 1.5-5.5S11 8 12 9m0 0c1-.5 3-1 4.5.5S18 13 18 15"></path>
-                            </svg>
-                        </div>
+                        <img src="/static/WEC_Logo_only.jpg" alt="WEC Logo" class="w-10 h-10 object-contain rounded-full">
                     </div>
                     <div>
                         <h1 class="font-serif text-xl font-semibold text-brown">Wellness Librarian</h1>
@@ -82,19 +78,10 @@
                     <!-- Welcome message -->
                     <template x-if="messages.length === 0">
                         <div class="welcome-container text-center py-12 relative">
-                            <!-- Decorative leaf elements -->
-                            <div class="decorative-leaf decorative-leaf-left"></div>
-                            <div class="decorative-leaf decorative-leaf-right"></div>
-
-                            <!-- Welcome icon - warm lotus/wellness symbol -->
+                            <!-- Welcome icon - WEC Logo -->
                             <div class="welcome-icon-wrapper mx-auto mb-6">
                                 <div class="welcome-icon-glow"></div>
-                                <div class="w-24 h-24 bg-gradient-to-br from-teal to-teal-dark rounded-full flex items-center justify-center relative z-10 shadow-lg">
-                                    <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <!-- Lotus/wellness inspired icon -->
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 21c-1.5-1.5-3-4-3-7 0-2 1-4 3-5m0 12c1.5-1.5 3-4 3-7 0-2-1-4-3-5m0 12V9m-6 6c-.5-2 0-4 1.5-5.5S11 8 12 9m0 0c1-.5 3-1 4.5.5S18 13 18 15M6 12c-1.5-.5-3 0-4 2m16-2c1.5-.5 3 0 4 2"></path>
-                                    </svg>
-                                </div>
+                                <img src="/static/WEC_Logo_only.jpg" alt="Wellness Evolution Community" class="w-24 h-24 object-contain rounded-full relative z-10 shadow-lg">
                             </div>
 
                             <h2 class="font-serif text-3xl font-semibold text-brown mb-3">Welcome to the Wellness Librarian</h2>
@@ -158,9 +145,9 @@
                                             Sources:
                                         </p>
                                         <div class="space-y-2">
-                                            <template x-for="source in msg.sources" :key="source.vimeo_id">
+                                            <template x-for="source in msg.sources" :key="source.video_id">
                                                 <a
-                                                    :href="source.vimeo_url"
+                                                    :href="source.video_url"
                                                     target="_blank"
                                                     rel="noopener"
                                                     class="source-card"
@@ -170,6 +157,12 @@
                                                         <span x-text="source.category"></span>
                                                         <span class="text-teal/40">•</span>
                                                         <span x-text="source.duration"></span>
+                                                        <template x-if="source.source">
+                                                            <span class="text-teal/40">•</span>
+                                                        </template>
+                                                        <template x-if="source.source">
+                                                            <span x-text="source.source === 'youtube' ? 'YouTube' : 'Vimeo'" class="text-teal/60"></span>
+                                                        </template>
                                                     </span>
                                                 </a>
                                             </template>
