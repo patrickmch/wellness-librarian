@@ -2,10 +2,20 @@
 
 ## Current Status
 
-**Phase:** 6 of 6 - Deployment (Complete) + Frontend Polish ✨
+**Phase:** 6 of 6 - Deployment (Complete) + Multi-Source Support ✨
 **Last Updated:** 2026-01-22
 
 ### All Phases Complete ✅
+
+### Multi-Source Support (2026-01-22) ✅
+
+Refactored ingestion pipeline to support multiple video sources (YouTube + Vimeo):
+
+- **Source-agnostic fields:** `video_id`, `video_url` replace Vimeo-specific names
+- **Auto-detection:** Loader detects source from metadata JSON fields (`youtube_id` vs `vimeo_id`)
+- **New metadata fields:** `source` ("youtube"/"vimeo"), `access_level` ("public"/"members_only")
+- **119 YouTube videos ingested:** 21,078 chunks from public YouTube content
+- **Filtering support:** Search by `source` or `access_level` in API
 
 ### Frontend Polish (2026-01-22) ✅
 
@@ -107,18 +117,20 @@ Implemented WEC brand polish to better match the Wellness Evolution Community ae
 | Path | Description |
 |------|-------------|
 | `~/code/wellness-librarian` | Project root |
-| `~/Documents/wellness_evolution_community/vimeo_transcripts_rag` | Transcript source |
+| `~/Documents/wellness_evolution_community/vimeo_transcripts_rag` | Vimeo transcripts (members-only) |
+| `~/Documents/wellness_evolution_community/youtube_transcripts` | YouTube transcripts (public) |
 | `./data/chroma_db` | Vector database |
 
 ## Corpus Statistics
 
 | Metric | Value |
 |--------|-------|
-| Videos | 76 |
-| Categories | 16 |
-| Total Characters | 2,559,008 |
-| Chunks | 3,622 |
-| Estimated Embedding Cost | $0.02 |
+| Total Videos | 195 (76 Vimeo + 119 YouTube) |
+| Total Chunks | 24,700 |
+| Vimeo Chunks | 3,622 (members-only) |
+| YouTube Chunks | 21,078 (public) |
+| Categories | 17 |
+| Estimated Embedding Cost | $0.12 |
 
 ## API Endpoints
 
@@ -132,13 +144,14 @@ Implemented WEC brand polish to better match the Wellness Evolution Community ae
 
 ## Design Decisions
 
-1. **Metadata Source:** JSON from Vimeo export for rich citations
-2. **VTT Parsing:** Timestamps preserved for future deep-linking
-3. **Chunk Strategy:** 1000 chars, 200 overlap, semantic boundaries
-4. **Python Version:** 3.12 for ChromaDB compatibility
-5. **Deterministic IDs:** `{vimeo_id}::chunk::{index}` for idempotency
-6. **Frontend Stack:** No build step (Tailwind CDN + Alpine.js)
-7. **WEC Brand Polish:** CSS-only decorative elements (inline SVG, gradients) - no external images to manage
+1. **Multi-Source Support:** Source-agnostic fields (`video_id`, `video_url`) with auto-detection
+2. **Access Levels:** YouTube=public, Vimeo=members_only for future gating
+3. **VTT Parsing:** Timestamps preserved for future deep-linking
+4. **Chunk Strategy:** 1000 chars, 200 overlap, semantic boundaries
+5. **Python Version:** 3.12 for ChromaDB compatibility
+6. **Deterministic IDs:** `{video_id}::chunk::{index}` for idempotency
+7. **Frontend Stack:** No build step (Tailwind CDN + Alpine.js)
+8. **WEC Brand Polish:** CSS-only decorative elements (inline SVG, gradients) - no external images to manage
 
 ## Monthly Cost Estimate
 

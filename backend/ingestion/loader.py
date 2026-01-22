@@ -1,6 +1,7 @@
 """
 File loader for VTT transcripts with metadata.json integration.
-Parses WebVTT format and joins with rich Vimeo metadata.
+Parses WebVTT format and joins with rich video metadata from multiple sources
+(YouTube, Vimeo).
 """
 
 import json
@@ -16,18 +17,20 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VideoMetadata:
-    """Rich metadata for a video from metadata.json."""
-    vimeo_id: str
+    """Rich metadata for a video from metadata.json (supports YouTube and Vimeo)."""
+    video_id: str  # YouTube or Vimeo ID
     title: str
     description: Optional[str]
     duration_seconds: int
     created_time: Optional[datetime]
-    vimeo_url: str
+    video_url: str  # Full URL to video
     folder_path: str
     folder_name: str
     tags: list[str]
     language: Optional[str]
     transcript_file: str
+    source: str = "vimeo"  # "youtube" or "vimeo"
+    access_level: str = "members_only"  # "public" or "members_only"
 
     @property
     def duration_formatted(self) -> str:
@@ -41,16 +44,18 @@ class VideoMetadata:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage in vector DB metadata."""
         return {
-            "vimeo_id": self.vimeo_id,
+            "video_id": self.video_id,
             "title": self.title,
             "description": self.description,
             "duration_seconds": self.duration_seconds,
             "duration": self.duration_formatted,
             "created_date": self.created_time.date().isoformat() if self.created_time else None,
-            "vimeo_url": self.vimeo_url,
+            "video_url": self.video_url,
             "category": self.folder_name,
             "tags": self.tags,
             "language": self.language,
+            "source": self.source,
+            "access_level": self.access_level,
         }
 
 
@@ -64,8 +69,8 @@ class TranscriptFile:
 
     @property
     def file_id(self) -> str:
-        """Unique identifier using Vimeo ID."""
-        return self.metadata.vimeo_id
+        """Unique identifier using video ID."""
+        return self.metadata.video_id
 
     @property
     def category(self) -> str:
@@ -189,26 +194,45 @@ def load_metadata(source_dir: Path) -> dict[str, VideoMetadata]:
         if not transcript_file:
             continue
 
-        # Parse created_time
+        # Auto-detect source from metadata fields
+        if "youtube_id" in video:
+            video_id = video.get("youtube_id", "")
+            video_url = video.get("youtube_url", "")
+            source = "youtube"
+        elif "vimeo_id" in video:
+            video_id = video.get("vimeo_id", "")
+            video_url = video.get("vimeo_url", "")
+            source = "vimeo"
+        else:
+            logger.warning(f"Unknown video source for {transcript_file}, skipping")
+            continue
+
+        # Determine access level (default: members_only for Vimeo, public for YouTube)
+        access_level = video.get("access_level", "public" if source == "youtube" else "members_only")
+
+        # Parse created_time (Vimeo uses created_time, YouTube may use upload_date)
         created_time = None
-        if video.get("created_time"):
+        time_field = video.get("created_time") or video.get("upload_date")
+        if time_field:
             try:
-                created_time = datetime.fromisoformat(video["created_time"].replace("Z", "+00:00"))
+                created_time = datetime.fromisoformat(time_field.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
 
         metadata_map[transcript_file] = VideoMetadata(
-            vimeo_id=video.get("vimeo_id", ""),
+            video_id=video_id,
             title=video.get("title", ""),
             description=video.get("description"),
-            duration_seconds=video.get("duration_seconds", 0),
+            duration_seconds=int(video.get("duration_seconds", 0)),
             created_time=created_time,
-            vimeo_url=video.get("vimeo_url", ""),
+            video_url=video_url,
             folder_path=video.get("folder_path", ""),
             folder_name=video.get("folder_name", "Uncategorized"),
             tags=video.get("tags", []),
             language=video.get("language"),
             transcript_file=transcript_file,
+            source=source,
+            access_level=access_level,
         )
 
     logger.info(f"Loaded metadata for {len(metadata_map)} videos")
@@ -293,17 +317,19 @@ def load_single_transcript(filepath: Path, source_dir: Path) -> TranscriptFile:
     if not metadata:
         # Create minimal metadata if not found in JSON
         metadata = VideoMetadata(
-            vimeo_id=filepath.stem,
+            video_id=filepath.stem,
             title=filepath.stem,
             description=None,
             duration_seconds=0,
             created_time=None,
-            vimeo_url="",
+            video_url="",
             folder_path=filepath.parent.name,
             folder_name=filepath.parent.name,
             tags=[],
             language="en",
             transcript_file=relative_path,
+            source="unknown",
+            access_level="members_only",
         )
 
     vtt_content = filepath.read_text(encoding="utf-8", errors="replace")

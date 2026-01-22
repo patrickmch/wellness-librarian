@@ -31,8 +31,12 @@ class RetrievalResult:
         return self.metadata.get("category", "Unknown")
 
     @property
-    def vimeo_url(self) -> str:
-        return self.metadata.get("vimeo_url", "")
+    def video_url(self) -> str:
+        return self.metadata.get("video_url", "")
+
+    @property
+    def source(self) -> str:
+        return self.metadata.get("source", "")
 
     @property
     def citation(self) -> str:
@@ -72,21 +76,22 @@ class RetrievalResponse:
         Get unique sources with metadata.
 
         Returns:
-            List of source dicts with title, category, url
+            List of source dicts with title, category, url, source
         """
         seen = set()
         sources = []
 
         for result in self.results:
-            vimeo_id = result.metadata.get("vimeo_id")
-            if vimeo_id and vimeo_id not in seen:
-                seen.add(vimeo_id)
+            video_id = result.metadata.get("video_id")
+            if video_id and video_id not in seen:
+                seen.add(video_id)
                 sources.append({
                     "title": result.title,
                     "category": result.category,
-                    "vimeo_url": result.vimeo_url,
+                    "video_url": result.video_url,
                     "duration": result.metadata.get("duration", ""),
-                    "vimeo_id": vimeo_id,
+                    "video_id": video_id,
+                    "source": result.source,
                 })
 
         return sources

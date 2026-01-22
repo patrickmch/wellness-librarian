@@ -32,7 +32,6 @@ from backend.rag.generator import (
 from backend.rag.retriever import retrieve, get_stats
 from backend.rag.vectorstore import get_document_count
 from backend.ingestion.pipeline import ingest_single
-from backend.ingestion.loader import get_categories, get_transcript_count
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +81,10 @@ async def chat(request: ChatRequest):
                 SourceInfo(
                     title=s.get("title", ""),
                     category=s.get("category", ""),
-                    vimeo_url=s.get("vimeo_url", ""),
+                    video_url=s.get("video_url", ""),
                     duration=s.get("duration", ""),
-                    vimeo_id=s.get("vimeo_id", ""),
+                    video_id=s.get("video_id", ""),
+                    source=s.get("source", ""),
                 )
                 for s in result.sources
             ],
@@ -118,9 +118,10 @@ async def search(request: SearchRequest):
                     score=r.score,
                     title=r.title,
                     category=r.category,
-                    vimeo_url=r.vimeo_url,
+                    video_url=r.video_url,
                     chunk_index=r.metadata.get("chunk_index", 0),
                     total_chunks=r.metadata.get("total_chunks", 1),
+                    source=r.source,
                 )
                 for r in retrieval.results
             ],
@@ -140,19 +141,17 @@ async def list_sources():
     Returns information about the indexed transcript library.
     """
     try:
-        settings = get_settings()
         stats = get_stats()
-        categories = get_categories(settings.transcript_source_dir)
 
         return SourcesResponse(
-            total_videos=get_transcript_count(settings.transcript_source_dir),
-            total_chunks=get_document_count(),
+            total_videos=stats.get("unique_videos", 0),
+            total_chunks=stats.get("total_chunks", 0),
             categories=[
                 CategoryInfo(
                     name=cat,
-                    video_count=stats.get("categories", {}).get(cat, 0),
+                    video_count=count,
                 )
-                for cat in categories
+                for cat, count in sorted(stats.get("categories", {}).items())
             ],
         )
 

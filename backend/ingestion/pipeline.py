@@ -22,7 +22,7 @@ from backend.rag.embeddings import embed_texts, estimate_embedding_cost
 from backend.rag.vectorstore import (
     upsert_documents,
     document_exists,
-    delete_by_vimeo_id,
+    delete_by_video_id,
     get_document_count,
 )
 
@@ -82,7 +82,7 @@ def ingest_transcript(
 
     # If forcing, delete existing chunks for this video
     if force:
-        deleted = delete_by_vimeo_id(transcript.metadata.vimeo_id)
+        deleted = delete_by_video_id(transcript.metadata.video_id)
         if deleted:
             logger.debug(f"Deleted {deleted} existing chunks for {transcript.metadata.title}")
 

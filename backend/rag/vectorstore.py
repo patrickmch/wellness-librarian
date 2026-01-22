@@ -257,30 +257,30 @@ def document_exists(doc_id: str) -> bool:
     return len(result["ids"]) > 0
 
 
-def get_documents_by_vimeo_id(vimeo_id: str) -> dict:
+def get_documents_by_video_id(video_id: str) -> dict:
     """
     Get all chunks for a specific video.
 
     Args:
-        vimeo_id: Vimeo video ID
+        video_id: YouTube or Vimeo video ID
 
     Returns:
         Dict with ids, documents, metadatas
     """
     collection = get_collection()
     results = collection.get(
-        where={"vimeo_id": vimeo_id},
+        where={"video_id": video_id},
         include=["documents", "metadatas"],
     )
     return results
 
 
-def delete_by_vimeo_id(vimeo_id: str) -> int:
+def delete_by_video_id(video_id: str) -> int:
     """
     Delete all chunks for a specific video.
 
     Args:
-        vimeo_id: Vimeo video ID
+        video_id: YouTube or Vimeo video ID
 
     Returns:
         Number of documents deleted
@@ -289,7 +289,7 @@ def delete_by_vimeo_id(vimeo_id: str) -> int:
 
     # Get existing documents for this video
     existing = collection.get(
-        where={"vimeo_id": vimeo_id},
+        where={"video_id": video_id},
         include=[],
     )
 
@@ -323,23 +323,30 @@ def reset_collection() -> None:
 def get_collection_stats() -> dict:
     """Get statistics about the collection."""
     collection = get_collection()
+    total_chunks = collection.count()
 
-    # Get sample to analyze categories
+    # Get all documents to analyze categories and sources
     sample = collection.get(
-        limit=1000,
+        limit=total_chunks,  # Get all documents for accurate stats
         include=["metadatas"],
     )
 
     categories = {}
+    sources = {}
     videos = set()
 
     for meta in sample.get("metadatas", []):
         cat = meta.get("category", "Unknown")
         categories[cat] = categories.get(cat, 0) + 1
-        videos.add(meta.get("vimeo_id"))
+
+        source = meta.get("source", "unknown")
+        sources[source] = sources.get(source, 0) + 1
+
+        videos.add(meta.get("video_id"))
 
     return {
         "total_chunks": collection.count(),
         "unique_videos": len(videos),
         "categories": categories,
+        "sources": sources,
     }

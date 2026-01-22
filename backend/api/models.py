@@ -34,9 +34,10 @@ class SourceInfo(BaseModel):
     """Information about a source video."""
     title: str
     category: str
-    vimeo_url: str
+    video_url: str
     duration: str
-    vimeo_id: str
+    video_id: str
+    source: str = ""  # "youtube" or "vimeo"
 
 
 class ChatResponse(BaseModel):
@@ -52,9 +53,10 @@ class SearchResult(BaseModel):
     score: float
     title: str
     category: str
-    vimeo_url: str
+    video_url: str
     chunk_index: int
     total_chunks: int
+    source: str = ""  # "youtube" or "vimeo"
 
 
 class SearchResponse(BaseModel):

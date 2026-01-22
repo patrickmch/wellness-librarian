@@ -276,7 +276,7 @@ def format_sources_markdown(sources: list[dict]) -> str:
         title = source.get("title", "Unknown")
         category = source.get("category", "")
         duration = source.get("duration", "")
-        url = source.get("vimeo_url", "")
+        url = source.get("video_url", "")
 
         line = f"- **{title}**"
         if category:

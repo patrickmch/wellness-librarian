@@ -19,14 +19,14 @@ class TextChunk:
     total_chunks: int
     start_char: int
     end_char: int
-    source_id: str  # Vimeo ID
+    source_id: str  # YouTube or Vimeo ID
     source_title: str
 
     @property
     def chunk_id(self) -> str:
         """
         Deterministic ID for deduplication.
-        Based on Vimeo ID and chunk index to ensure consistency across runs.
+        Based on video ID and chunk index to ensure consistency across runs.
         """
         return hashlib.md5(
             f"{self.source_id}::chunk::{self.chunk_index}".encode()
@@ -151,7 +151,7 @@ def chunk_transcript(
             total_chunks=total_chunks,
             start_char=start_pos,
             end_char=end_pos,
-            source_id=transcript.metadata.vimeo_id,
+            source_id=transcript.metadata.video_id,
             source_title=transcript.metadata.title,
         )
 
