@@ -29,8 +29,15 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 
-# Copy pre-built ChromaDB with indexed vectors
-COPY data/ ./data/
+# Copy data to SEED directory (not the mount point)
+# This allows volume seeding on first deploy
+COPY data/ ./data-seed/
+
+# Create empty data directory (volume will mount here)
+RUN mkdir -p ./data
+
+# Make init script executable
+RUN chmod +x ./scripts/init-data.sh
 
 # Expose port (Railway will override with $PORT)
 EXPOSE ${PORT}
@@ -39,5 +46,8 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health || exit 1
 
-# Run the application with dynamic port
-CMD python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}
+# Use init script as entrypoint (seeds volume if empty, then runs CMD)
+ENTRYPOINT ["./scripts/init-data.sh"]
+
+# Default command (init script handles PORT variable)
+CMD []

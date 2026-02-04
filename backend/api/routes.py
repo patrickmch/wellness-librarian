@@ -23,8 +23,12 @@ from backend.api.models import (
     IngestResponse,
     HealthResponse,
     ErrorResponse,
+    PipelineMetadata,
+    FeedbackRequest,
+    FeedbackResponse,
 )
-from backend.rag.generator import (
+from backend.rag.docstore.sqlite_store import get_docstore
+from backend.rag.pipelines import (
     generate_response,
     generate_response_async,
     generate_response_stream,
@@ -53,27 +57,59 @@ async def chat(request: ChatRequest):
 
     Send a question and receive an AI-generated response based on
     the video transcript library, with source citations.
+
+    Optionally provide session_id for A/B test routing between
+    legacy and enhanced pipelines.
     """
     try:
+        # Convert ChatMessage models to dicts for the pipeline
+        history = None
+        if request.history:
+            history = [{"role": h.role, "content": h.content} for h in request.history]
+
         if request.stream:
             # Return streaming response
+            # For streaming, we use the async generator and return metadata separately
+            stream, metadata = await generate_response_stream(
+                user_message=request.message,
+                category=request.category,
+                session_id=request.session_id,
+                history=history,
+            )
+
             async def generate():
-                async for chunk in generate_response_stream(
-                    user_message=request.message,
-                    category=request.category,
-                ):
+                async for chunk in stream:
                     yield chunk
 
             return StreamingResponse(
                 generate(),
                 media_type="text/plain",
+                headers={
+                    "X-Pipeline-Used": metadata.get("pipeline_name", "unknown"),
+                },
             )
 
         # Non-streaming response
         result = await generate_response_async(
             user_message=request.message,
             category=request.category,
+            session_id=request.session_id,
+            history=history,
         )
+
+        # Build pipeline metadata from result
+        pipeline_meta = None
+        if result.pipeline_metadata:
+            pipeline_meta = PipelineMetadata(
+                embedding_model=result.pipeline_metadata.get("embedding_model"),
+                reranking_enabled=result.pipeline_metadata.get("reranking_enabled"),
+                diversity_enabled=result.pipeline_metadata.get("diversity_enabled"),
+                max_per_video=result.pipeline_metadata.get("max_per_video"),
+                children_searched=result.pipeline_metadata.get("children_searched"),
+                parents_expanded=result.pipeline_metadata.get("parents_expanded"),
+                critic_enabled=result.pipeline_metadata.get("critic_enabled"),
+                critic_corrected=result.pipeline_metadata.get("critic_corrected"),
+            )
 
         return ChatResponse(
             response=result.response,
@@ -85,10 +121,14 @@ async def chat(request: ChatRequest):
                     duration=s.get("duration", ""),
                     video_id=s.get("video_id", ""),
                     source=s.get("source", ""),
+                    start_time_seconds=s.get("start_time_seconds", 0),
+                    excerpt=s.get("excerpt"),
                 )
                 for s in result.sources
             ],
             retrieval_count=result.retrieval_count,
+            pipeline_used=result.pipeline_name,
+            pipeline_metadata=pipeline_meta,
         )
 
     except Exception as e:
@@ -138,14 +178,16 @@ async def list_sources():
     """
     List available video categories and statistics.
 
-    Returns information about the indexed transcript library.
+    Returns information about the indexed transcript library (v2 enhanced index).
     """
     try:
-        stats = get_stats()
+        # Use v2 docstore stats for accurate counts
+        docstore = get_docstore()
+        stats = docstore.get_stats()
 
         return SourcesResponse(
             total_videos=stats.get("unique_videos", 0),
-            total_chunks=stats.get("total_chunks", 0),
+            total_chunks=stats.get("total_parent_chunks", 0),
             categories=[
                 CategoryInfo(
                     name=cat,
@@ -232,3 +274,30 @@ async def health_check():
             version="1.0.0",
             vector_store_chunks=0,
         )
+
+
+@router.post("/feedback", response_model=FeedbackResponse, responses={500: {"model": ErrorResponse}})
+async def submit_feedback(request: FeedbackRequest):
+    """
+    Submit user feedback (thumbs up/down) for a response.
+
+    Stores feedback in SQLite for analytics and improvement tracking.
+    """
+    try:
+        docstore = get_docstore()
+        feedback_id = docstore.add_feedback(
+            message_id=request.message_id,
+            feedback_type=request.feedback_type,
+            session_id=request.session_id,
+            query=request.query,
+            parent_ids=request.parent_ids,
+        )
+
+        return FeedbackResponse(
+            status="ok",
+            feedback_id=feedback_id,
+        )
+
+    except Exception as e:
+        logger.exception("Error in feedback endpoint")
+        raise HTTPException(status_code=500, detail=str(e))

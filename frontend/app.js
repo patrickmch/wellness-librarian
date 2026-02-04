@@ -9,6 +9,8 @@ function chatApp() {
         inputMessage: '',
         isLoading: false,
         messageIdCounter: 0, // Unique ID counter for messages
+        sessionId: 'session-' + Date.now(), // Session ID for feedback tracking
+        currentSources: [], // Sources for current message (used by citation links)
         stats: {
             total_videos: 0,
             total_chunks: 0,
@@ -43,6 +45,13 @@ function chatApp() {
             const message = this.inputMessage.trim();
             if (!message || this.isLoading) return;
 
+            // Build conversation history from previous messages (excluding the current one)
+            // Only include role and content fields for the API
+            const history = this.messages.map(m => ({
+                role: m.role,
+                content: m.content,
+            }));
+
             // Add user message
             this.messages.push({
                 id: this.generateMessageId(),
@@ -63,6 +72,8 @@ function chatApp() {
                     body: JSON.stringify({
                         message: message,
                         stream: false,
+                        history: history.length > 0 ? history : null,
+                        session_id: this.sessionId,
                     }),
                 });
 
@@ -72,12 +83,15 @@ function chatApp() {
 
                 const data = await response.json();
 
-                // Add assistant message
+                // Add assistant message with query reference for feedback
                 this.messages.push({
                     id: this.generateMessageId(),
                     role: 'assistant',
                     content: data.response,
                     sources: data.sources,
+                    query: message, // Store original query for feedback
+                    feedback: null, // Will be 'up' or 'down' after user rates
+                    showExcerpts: false, // For glass box toggle
                 });
 
             } catch (error) {
@@ -110,7 +124,10 @@ function chatApp() {
             });
         },
 
-        formatMessage(content) {
+        formatMessage(content, sources = []) {
+            // Store sources locally for citation link building
+            const msgSources = sources || [];
+
             // Convert markdown-like formatting to HTML
             let html = content;
 
@@ -126,7 +143,7 @@ function chatApp() {
             // Italic *text*
             html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
-            // Links [text](url)
+            // Links [text](url) - but NOT citation-style [1], [2] etc
             html = html.replace(
                 /\[([^\]]+)\]\(([^)]+)\)/g,
                 '<a href="$2" target="_blank" rel="noopener">$1</a>'
@@ -163,7 +180,66 @@ function chatApp() {
             // Single newlines to <br>
             html = html.replace(/\n/g, '<br>');
 
+            // Convert citation references [1], [2], etc. to clickable links
+            html = html.replace(/\[(\d+)\]/g, (match, num) => {
+                const idx = parseInt(num) - 1;
+                const source = msgSources[idx];
+                if (!source) return match;
+
+                // Build deep link inline to avoid 'this' context issues
+                const t = source.start_time_seconds || 0;
+                let deepLink;
+                if (source.source === 'youtube') {
+                    deepLink = source.video_url.includes('?')
+                        ? `${source.video_url}&t=${t}`
+                        : `${source.video_url}?t=${t}`;
+                } else {
+                    deepLink = `${source.video_url}#t=${t}s`;
+                }
+
+                const safeTitle = (source.title || '').replace(/"/g, '&quot;');
+                return `<a href="${deepLink}" target="_blank" rel="noopener" class="citation-link" title="${safeTitle}">[${num}]</a>`;
+            });
+
             return html;
+        },
+
+        buildDeepLink(source) {
+            const t = source.start_time_seconds || 0;
+            if (source.source === 'youtube') {
+                // YouTube: append &t=123 or ?t=123
+                return source.video_url.includes('?')
+                    ? `${source.video_url}&t=${t}`
+                    : `${source.video_url}?t=${t}`;
+            } else {
+                // Vimeo: append #t=123s
+                return `${source.video_url}#t=${t}s`;
+            }
+        },
+
+        async submitFeedback(messageId, type) {
+            const msg = this.messages.find(m => m.id === messageId);
+            if (!msg || msg.feedback === type) return; // Already submitted this type
+
+            try {
+                await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message_id: messageId,
+                        feedback_type: type,
+                        session_id: this.sessionId,
+                        query: msg.query,
+                    }),
+                });
+                msg.feedback = type;
+            } catch (error) {
+                console.error('Failed to submit feedback:', error);
+            }
+        },
+
+        toggleExcerpts(msg) {
+            msg.showExcerpts = !msg.showExcerpts;
         },
     };
 }

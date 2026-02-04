@@ -15,8 +15,8 @@ env/
 dist/
 build/
 
-# Data
-# Note: chroma_db is included for deployment with pre-built vectors
+# Data (too large for GitHub - build locally, deploy via Docker)
+data/
 *.db
 
 # IDE

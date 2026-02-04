@@ -8,11 +8,19 @@ from pydantic import BaseModel, Field
 
 # === Request Models ===
 
+class ChatMessage(BaseModel):
+    """A single message in conversation history."""
+    role: str = Field(..., description="Message role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
+
 class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
     message: str = Field(..., min_length=1, max_length=2000, description="User's question")
     category: Optional[str] = Field(None, description="Filter by category")
     stream: bool = Field(False, description="Enable streaming response")
+    session_id: Optional[str] = Field(None, description="Session ID for A/B test routing")
+    history: Optional[list[ChatMessage]] = Field(None, description="Previous conversation turns for context")
 
 
 class SearchRequest(BaseModel):
@@ -28,6 +36,15 @@ class IngestRequest(BaseModel):
     force: bool = Field(False, description="Replace if exists")
 
 
+class FeedbackRequest(BaseModel):
+    """Request body for feedback endpoint."""
+    message_id: str = Field(..., description="ID of the message being rated")
+    feedback_type: str = Field(..., description="Feedback type: 'up' or 'down'")
+    session_id: Optional[str] = Field(None, description="Session ID for tracking")
+    query: Optional[str] = Field(None, description="Original query text")
+    parent_ids: Optional[list[str]] = Field(None, description="Parent chunk IDs used")
+
+
 # === Response Models ===
 
 class SourceInfo(BaseModel):
@@ -38,6 +55,20 @@ class SourceInfo(BaseModel):
     duration: str
     video_id: str
     source: str = ""  # "youtube" or "vimeo"
+    start_time_seconds: int = 0  # Video timestamp for deep-linking
+    excerpt: Optional[str] = None  # Raw transcript excerpt for glass box
+
+
+class PipelineMetadata(BaseModel):
+    """Metadata about the pipeline used for the response."""
+    embedding_model: Optional[str] = None
+    reranking_enabled: Optional[bool] = None
+    diversity_enabled: Optional[bool] = None
+    max_per_video: Optional[int] = None
+    children_searched: Optional[int] = None
+    parents_expanded: Optional[int] = None
+    critic_enabled: Optional[bool] = None
+    critic_corrected: Optional[bool] = None
 
 
 class ChatResponse(BaseModel):
@@ -45,6 +76,8 @@ class ChatResponse(BaseModel):
     response: str
     sources: list[SourceInfo]
     retrieval_count: int
+    pipeline_used: str = Field("legacy", description="Pipeline used: 'legacy' or 'enhanced'")
+    pipeline_metadata: Optional[PipelineMetadata] = None
 
 
 class SearchResult(BaseModel):
@@ -98,3 +131,9 @@ class ErrorResponse(BaseModel):
     """Standard error response."""
     error: str
     detail: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    """Response body for feedback endpoint."""
+    status: str
+    feedback_id: str
