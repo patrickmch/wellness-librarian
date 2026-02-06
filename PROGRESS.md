@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**Phase:** All Core Features Complete ✨
+**Phase:** Incremental Video Sync Ready 🚀
 **Last Updated:** 2026-02-04
 
 ### Session Context (for resuming)
@@ -16,6 +16,8 @@
 - Diagnostic script added: `scripts/diagnose_retrieval.py`
 - System prompt updated to handle content/intent mismatch (e.g., specific thyroid content for general weight loss queries)
 - Multi-turn conversation history: Client-side history sent with each request for context continuity
+- Supabase pgvector backend - Unified Postgres storage replaces ChromaDB + SQLite
+- **NEW: Incremental Video Sync Pipeline** - Automated discovery and ingestion from Vimeo/YouTube with tracking
 
 **Current tuning parameters:**
 ```python
@@ -38,6 +40,181 @@ uvicorn backend.main:app --reload
 python scripts/diagnose_retrieval.py "your query here"
 python scripts/diagnose_retrieval.py "how to lose weight" --max-per-video 1 --verbose
 ```
+
+---
+
+### Supabase Migration (2026-02-04) ✅
+
+Implemented dual-backend architecture supporting both local SQLite/ChromaDB and production Supabase with pgvector.
+
+**Why Supabase?**
+- **Portability:** Single managed database, no volume mounting or file syncing
+- **Maintainability:** Standard SQL, familiar to future maintainers
+- **Scalability:** Can self-host Postgres later if needed
+- **Simplicity:** Eliminates Railway volume seeding complexity
+
+**Architecture:**
+
+| Backend | Child Storage | Parent Storage | Use Case |
+|---------|--------------|----------------|----------|
+| `sqlite` | ChromaDB (local file) | SQLite (local file) | Local development |
+| `supabase` | Supabase pgvector | Supabase Postgres | Production |
+
+**New Files:**
+```
+backend/rag/stores/
+├── __init__.py
+└── supabase_store.py    # Unified Supabase operations
+
+scripts/
+└── migrate_to_supabase.py   # Migration from ChromaDB+SQLite
+```
+
+**Modified Files:**
+```
+backend/config.py              # Added supabase_url, supabase_key, supabase_db_url, store_backend
+backend/rag/retrieval/parent_child.py  # Dual-backend retrieval
+backend/api/routes.py          # Dual-backend for /sources and /feedback
+scripts/ingest_v2.py           # Added --target supabase flag
+requirements.txt               # Added psycopg2-binary
+Dockerfile                     # Simplified (no init script needed)
+.env.example                   # Added Supabase vars
+```
+
+**Environment Variables:**
+```bash
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=eyJhbG...
+SUPABASE_DB_URL=postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
+STORE_BACKEND=supabase  # or "sqlite" for local
+```
+
+**Migration Commands:**
+```bash
+# Migrate existing data from ChromaDB+SQLite to Supabase
+python scripts/migrate_to_supabase.py --create-index
+
+# Or re-ingest directly to Supabase
+python scripts/ingest_v2.py --target supabase --reset
+
+# Verify migration
+python scripts/migrate_to_supabase.py --verify
+```
+
+**Supabase Schema:**
+```sql
+-- Parent chunks (replaces SQLite parent_chunks)
+CREATE TABLE parent_chunks (
+    parent_id TEXT PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    token_count INTEGER NOT NULL,
+    ...
+);
+
+-- Child chunks with vectors (replaces ChromaDB)
+CREATE TABLE child_chunks (
+    child_id TEXT PRIMARY KEY,
+    parent_id TEXT REFERENCES parent_chunks(parent_id),
+    text TEXT NOT NULL,
+    embedding vector(1024),  -- Voyage voyage-3 dimension
+    ...
+);
+
+-- IVFFlat index for fast similarity search
+CREATE INDEX idx_child_embedding ON child_chunks
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 100);
+```
+
+**Cost:** Supabase free tier ($0/month for this use case: ~100MB data, low traffic)
+
+---
+
+### Incremental Video Sync Pipeline (2026-02-04) ✅
+
+Implemented automated video discovery and ingestion from Vimeo and YouTube with incremental sync (only process new videos).
+
+**Architecture:**
+```
+SyncOrchestrator
+  1. Discover videos from Vimeo API + YouTube via yt-dlp
+  2. Compare with video_sync table in Supabase
+  3. Download transcripts for new videos only
+  4. Generate metadata.json for ingestion
+  5. Run ingest_v2 pipeline (Voyage embeddings → Supabase/ChromaDB)
+  6. Mark as synced in video_sync table
+```
+
+**New Files:**
+```
+backend/sync/
+├── __init__.py
+├── video_sync_store.py    # Supabase CRUD for video_sync table
+├── vimeo_downloader.py    # Vimeo API discovery + download
+├── youtube_downloader.py  # yt-dlp based discovery + download
+└── orchestrator.py        # Main sync coordinator
+
+scripts/
+└── sync_videos.py         # CLI entry point
+
+supabase/migrations/
+└── 001_video_sync.sql     # video_sync table schema
+```
+
+**Environment Variables:**
+```bash
+VIMEO_ACCESS_TOKEN=xxx           # Vimeo API token
+YOUTUBE_CHANNEL_URL=https://...  # YouTube channel URL
+YOUTUBE_PLAYLIST_IDS=PLxx,PLyy   # Comma-separated playlist IDs
+SYNC_ENABLED=true
+SYNC_TRANSCRIPT_DIR=./data/transcripts
+```
+
+**CLI Usage:**
+```bash
+# Full sync (discover + download + ingest new videos)
+python scripts/sync_videos.py
+
+# Preview what would sync
+python scripts/sync_videos.py --dry-run
+
+# Discovery only (no downloads)
+python scripts/sync_videos.py --discover-only
+
+# Single platform
+python scripts/sync_videos.py --platform vimeo
+
+# Force re-sync (ignore tracking)
+python scripts/sync_videos.py --force
+
+# Show sync status
+python scripts/sync_videos.py --status
+
+# Just ingest pending videos
+python scripts/sync_videos.py --ingest-only
+```
+
+**Supabase video_sync Table:**
+```sql
+CREATE TABLE video_sync (
+    video_id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL,       -- 'vimeo' or 'youtube'
+    title TEXT,
+    transcript_file TEXT,
+    folder_name TEXT,
+    status TEXT DEFAULT 'pending', -- pending | ingested | failed | no_transcript
+    ingested_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ,
+    metadata JSONB
+);
+```
+
+**Design Decisions:**
+- **Separation of concerns:** Discovery returns video objects, orchestrator decides what to download
+- **Idempotent upserts:** Running sync twice processes 0 new videos (incremental)
+- **Platform-aware paths:** Transcripts stored as `data/transcripts/vimeo/...` and `data/transcripts/youtube/...`
+- **Lazy initialization:** Downloaders only initialize when their platform is requested
 
 ---
 
@@ -389,7 +566,71 @@ Implemented WEC brand polish to better match the Wellness Evolution Community ae
 5. **Open browser:**
    Navigate to http://localhost:8000
 
-### Railway Deployment
+### Railway Deployment (with Supabase)
+
+#### Initial Setup (One-Time)
+
+1. **Create Supabase project** at https://supabase.com
+   - Enable pgvector: `CREATE EXTENSION IF NOT EXISTS vector;`
+   - Note the connection string and API key
+
+2. **Connect repository to Railway**
+   ```bash
+   railway login
+   railway link  # Link to existing project or create new
+   ```
+
+3. **Set environment variables** (Railway Dashboard or CLI):
+   ```bash
+   railway variables set OPENAI_API_KEY=sk-...
+   railway variables set ANTHROPIC_API_KEY=sk-ant-...
+   railway variables set VOYAGE_API_KEY=pa-...
+   railway variables set ADMIN_API_KEY=$(openssl rand -hex 32)
+   railway variables set RAG_PIPELINE=enhanced
+   railway variables set STORE_BACKEND=supabase
+   railway variables set SUPABASE_URL=https://xxx.supabase.co
+   railway variables set SUPABASE_KEY=eyJhbG...
+   railway variables set SUPABASE_DB_URL=postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
+   ```
+
+4. **Deploy**:
+   ```bash
+   railway up
+   # or push to GitHub and let Railway auto-deploy
+   ```
+
+5. **Populate Supabase** (one-time):
+   ```bash
+   # Option A: Migrate existing data
+   python scripts/migrate_to_supabase.py --create-index
+
+   # Option B: Re-ingest from scratch
+   python scripts/ingest_v2.py --target supabase --reset
+   ```
+
+#### Why Supabase is Better
+
+With Supabase, there's no need for:
+- Railway volumes
+- Volume seeding scripts
+- `init-data.sh` entrypoint
+
+All data lives in the managed Supabase Postgres database, making deployments simpler and more reliable.
+
+#### Updating Data
+
+To update the indexed data:
+```bash
+# Re-ingest to Supabase
+python scripts/ingest_v2.py --target supabase --reset
+```
+
+No container restarts or volume operations needed!
+
+### Railway Deployment (Legacy - with Volumes)
+
+<details>
+<summary>Click to expand legacy volume-based deployment</summary>
 
 #### Initial Setup (One-Time)
 
@@ -406,6 +647,7 @@ Implemented WEC brand polish to better match the Wellness Evolution Community ae
    railway variables set VOYAGE_API_KEY=pa-...
    railway variables set ADMIN_API_KEY=$(openssl rand -hex 32)
    railway variables set RAG_PIPELINE=enhanced
+   railway variables set STORE_BACKEND=sqlite
    ```
 
 3. **Create and attach volume**:
@@ -448,6 +690,8 @@ To update the indexed data:
    cp -r /app/data-seed/* /app/data/
    exit
    ```
+
+</details>
 
 #### Useful Commands
 
@@ -542,6 +786,15 @@ railway redeploy
 27. **Client-Side History:** Frontend owns conversation state; no server session storage needed. Keeps backend stateless.
 28. **History → Dict Conversion:** Route layer converts Pydantic ChatMessage to plain dict; pipeline layer stays framework-agnostic
 29. **RAG Context on Current Only:** History contains raw user/assistant messages; only current turn gets retrieval context. Avoids re-retrieving for past queries.
+
+### Supabase Migration Design Decisions
+
+30. **pgvector over ChromaDB:** Standard Postgres with vector extension is more portable and maintainable than specialized vector DB
+31. **IVFFlat Indexing:** Uses inverted file index with sqrt(n) lists for optimal query performance on ~17k vectors
+32. **Dual-Backend Architecture:** Config toggle (`store_backend`) allows gradual migration; local dev uses SQLite, production uses Supabase
+33. **psycopg2-binary:** Binary wheels avoid needing libpq-dev in all environments; acceptable for production use
+34. **Lazy Initialization:** Backend-specific stores only initialized when first accessed; prevents errors if config not set
+35. **Stateless Containers:** With Supabase, all persistent data lives in managed DB; no Railway volumes needed
 
 ## Monthly Cost Estimate
 

@@ -3,16 +3,21 @@
 Enhanced pipeline ingestion CLI for parent-child indexing.
 
 Creates the v2 vector store with:
-- Token-based parent chunks (500-2000 tokens) in SQLite docstore
-- Token-based child chunks (250 tokens) in ChromaDB
+- Token-based parent chunks (500-2000 tokens)
+- Token-based child chunks (250 tokens) with embeddings
 - Voyage AI embeddings
 
+Supports two backends:
+- ChromaDB + SQLite (default, for local development)
+- Supabase with pgvector (for production)
+
 Usage:
-    python scripts/ingest_v2.py              # Ingest all (skip existing)
-    python scripts/ingest_v2.py --force      # Re-ingest all
-    python scripts/ingest_v2.py --stats      # Show collection stats
-    python scripts/ingest_v2.py --reset      # Reset and re-ingest
-    python scripts/ingest_v2.py --estimate   # Estimate costs
+    python scripts/ingest_v2.py                      # Ingest to ChromaDB (local)
+    python scripts/ingest_v2.py --target supabase    # Ingest to Supabase
+    python scripts/ingest_v2.py --force              # Re-ingest all
+    python scripts/ingest_v2.py --stats              # Show collection stats
+    python scripts/ingest_v2.py --reset              # Reset and re-ingest
+    python scripts/ingest_v2.py --estimate           # Estimate costs
 """
 
 import argparse
@@ -62,6 +67,7 @@ class V2IngestionStats:
     total_child_tokens: int = 0
     embedding_cost_estimate: float = 0.0
     duration_seconds: float = 0.0
+    backend: str = "chroma"
     errors: list[str] = None
 
     def __post_init__(self):
@@ -70,6 +76,7 @@ class V2IngestionStats:
 
     def __str__(self) -> str:
         return (
+            f"Backend: {self.backend}\n"
             f"Transcripts: {self.transcripts_processed}\n"
             f"Parent chunks: {self.parents_created} ({self.total_parent_tokens:,} tokens)\n"
             f"Child chunks: {self.children_created} ({self.total_child_tokens:,} tokens)\n"
@@ -122,7 +129,7 @@ def reset_v2_collection(settings=None):
     logger.info(f"Cleared {count} parents from docstore")
 
 
-def show_stats():
+def show_stats(target: str = "chroma"):
     """Display v2 collection statistics."""
     settings = get_settings()
 
@@ -140,26 +147,42 @@ def show_stats():
         print(f"Error: {e}")
         return
 
-    print("\n=== V2 Vector Store (Children) ===")
-    try:
-        collection = get_v2_collection(settings)
-        child_count = collection.count()
-        print(f"Child chunks indexed: {child_count}")
-    except Exception as e:
-        print(f"Error: {e}")
+    if target == "supabase":
+        print("\n=== Supabase Store ===")
+        try:
+            from backend.rag.stores.supabase_store import SupabaseStore
+            store = SupabaseStore()
+            stats = store.get_stats()
+            print(f"Parent chunks: {stats['total_parent_chunks']}")
+            print(f"Child chunks indexed: {stats['child_chunks_indexed']}")
+            print(f"Unique videos: {stats['unique_videos']}")
+            print(f"Total tokens: {stats['total_tokens']:,}")
+            print("Parents by category:")
+            for cat, count in sorted(stats['categories'].items()):
+                print(f"  - {cat}: {count}")
+        except Exception as e:
+            print(f"Error: {e}")
+    else:
+        print("\n=== V2 Vector Store (Children) ===")
+        try:
+            collection = get_v2_collection(settings)
+            child_count = collection.count()
+            print(f"Child chunks indexed: {child_count}")
+        except Exception as e:
+            print(f"Error: {e}")
 
-    print("\n=== DocStore (Parents) ===")
-    try:
-        docstore = SQLiteDocStore(settings.docstore_path)
-        stats = docstore.get_stats()
-        print(f"Parent chunks: {stats['total_parent_chunks']}")
-        print(f"Unique videos: {stats['unique_videos']}")
-        print(f"Total tokens: {stats['total_tokens']:,}")
-        print("Parents by category:")
-        for cat, count in sorted(stats['categories'].items()):
-            print(f"  - {cat}: {count}")
-    except Exception as e:
-        print(f"Error: {e}")
+        print("\n=== DocStore (Parents) ===")
+        try:
+            docstore = SQLiteDocStore(settings.docstore_path)
+            stats = docstore.get_stats()
+            print(f"Parent chunks: {stats['total_parent_chunks']}")
+            print(f"Unique videos: {stats['unique_videos']}")
+            print(f"Total tokens: {stats['total_tokens']:,}")
+            print("Parents by category:")
+            for cat, count in sorted(stats['categories'].items()):
+                print(f"  - {cat}: {count}")
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 def estimate_costs():
@@ -201,6 +224,7 @@ def ingest_v2(
     source_dir: Path | None = None,
     force: bool = False,
     progress_callback=None,
+    target: str = "chroma",
 ) -> V2IngestionStats:
     """
     Ingest transcripts into v2 parent-child structure.
@@ -209,6 +233,7 @@ def ingest_v2(
         source_dir: Override transcript source directory
         force: Re-ingest even if exists
         progress_callback: Optional progress callback(current, total, message)
+        target: "chroma" for ChromaDB+SQLite, "supabase" for Supabase pgvector
 
     Returns:
         V2IngestionStats with results
@@ -216,12 +241,19 @@ def ingest_v2(
     settings = get_settings()
     source_dir = source_dir or settings.transcript_source_dir
 
-    stats = V2IngestionStats()
+    stats = V2IngestionStats(backend=target)
     start_time = time.time()
 
-    # Initialize components
-    docstore = SQLiteDocStore(settings.docstore_path)
-    collection = get_v2_collection(settings)
+    # Initialize components based on target
+    if target == "supabase":
+        from backend.rag.stores.supabase_store import SupabaseStore
+        store = SupabaseStore()
+        docstore = None
+        collection = None
+    else:
+        docstore = SQLiteDocStore(settings.docstore_path)
+        collection = get_v2_collection(settings)
+        store = None
 
     try:
         embedding_provider = VoyageEmbeddingProvider()
@@ -240,7 +272,11 @@ def ingest_v2(
         try:
             # Check if already indexed
             video_id = transcript.file_id
-            existing_parents = docstore.get_by_video_id(video_id)
+
+            if target == "supabase":
+                existing_parents = store.get_parents_by_video(video_id)
+            else:
+                existing_parents = docstore.get_by_video_id(video_id)
 
             if existing_parents and not force:
                 logger.debug(f"Skipping {transcript.metadata.title} (already indexed)")
@@ -250,16 +286,19 @@ def ingest_v2(
 
             # Delete existing if force re-index
             if existing_parents and force:
-                docstore.delete_by_video_id(video_id)
-                # Delete children from ChromaDB
-                try:
-                    existing_children = collection.get(
-                        where={"video_id": video_id}
-                    )
-                    if existing_children["ids"]:
-                        collection.delete(ids=existing_children["ids"])
-                except Exception:
-                    pass
+                if target == "supabase":
+                    store.delete_by_video_id(video_id)
+                else:
+                    docstore.delete_by_video_id(video_id)
+                    # Delete children from ChromaDB
+                    try:
+                        existing_children = collection.get(
+                            where={"video_id": video_id}
+                        )
+                        if existing_children["ids"]:
+                            collection.delete(ids=existing_children["ids"])
+                    except Exception:
+                        pass
 
             # Create parent chunks
             parents = chunk_transcript(transcript)
@@ -268,8 +307,12 @@ def ingest_v2(
                 logger.warning(f"No parent chunks created for {transcript.metadata.title}")
                 continue
 
-            # Store parents in docstore
-            docstore.add_batch(parents)
+            # Store parents
+            if target == "supabase":
+                store.add_parent_batch(parents)
+            else:
+                docstore.add_batch(parents)
+
             stats.parents_created += len(parents)
             stats.total_parent_tokens += sum(p.token_count for p in parents)
 
@@ -286,13 +329,16 @@ def ingest_v2(
             child_texts = [c.text for c in all_children]
             embeddings = embedding_provider.embed_texts(child_texts, input_type="document")
 
-            # Store children in ChromaDB
-            collection.add(
-                ids=[c.child_id for c in all_children],
-                documents=child_texts,
-                embeddings=embeddings,
-                metadatas=[c.to_chroma_metadata() for c in all_children],
-            )
+            # Store children with embeddings
+            if target == "supabase":
+                store.add_child_batch(all_children, embeddings)
+            else:
+                collection.add(
+                    ids=[c.child_id for c in all_children],
+                    documents=child_texts,
+                    embeddings=embeddings,
+                    metadatas=[c.to_chroma_metadata() for c in all_children],
+                )
 
             stats.children_created += len(all_children)
             stats.total_child_tokens += sum(c.token_count for c in all_children)
@@ -315,6 +361,14 @@ def ingest_v2(
     stats.embedding_cost_estimate = (stats.total_child_tokens / 1_000_000) * cost_per_million
     stats.duration_seconds = time.time() - start_time
 
+    # Create vector index for Supabase after bulk loading
+    if target == "supabase" and stats.children_created > 0:
+        logger.info("Creating IVFFlat vector index...")
+        import math
+        lists = max(10, int(math.sqrt(stats.children_created)))
+        store.create_vector_index(lists=lists)
+        logger.info(f"Created vector index with {lists} lists")
+
     return stats
 
 
@@ -327,6 +381,15 @@ def progress_callback(current: int, total: int, message: str):
     print(f"\r[{bar}] {percent:5.1f}% ({current}/{total}) {message[:50]:<50}", end="", flush=True)
 
 
+def reset_supabase():
+    """Reset the Supabase store."""
+    from backend.rag.stores.supabase_store import SupabaseStore
+    store = SupabaseStore()
+    result = store.clear_all()
+    logger.info(f"Cleared Supabase store: {result}")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Ingest transcripts into v2 parent-child structure"
@@ -336,6 +399,13 @@ def main():
     parser.add_argument("--reset", action="store_true", help="Reset collection before ingesting")
     parser.add_argument("--estimate", action="store_true", help="Estimate costs without ingesting")
     parser.add_argument("--source-dir", type=str, help="Override transcript source directory")
+    parser.add_argument(
+        "--target",
+        type=str,
+        choices=["chroma", "supabase"],
+        default="chroma",
+        help="Target backend: chroma (default) or supabase"
+    )
 
     args = parser.parse_args()
 
@@ -346,8 +416,13 @@ def main():
         print("Error: VOYAGE_API_KEY not set. Add it to .env file or environment.")
         sys.exit(1)
 
+    # Check for Supabase config if targeting Supabase
+    if args.target == "supabase" and not settings.supabase_db_url and not args.stats:
+        print("Error: SUPABASE_DB_URL not set. Add it to .env file or environment.")
+        sys.exit(1)
+
     if args.stats:
-        show_stats()
+        show_stats(target=args.target)
         return
 
     if args.estimate:
@@ -355,13 +430,19 @@ def main():
         return
 
     if args.reset:
-        print("Resetting v2 collection and docstore...")
-        reset_v2_collection(settings)
-        print("Reset complete.")
+        if args.target == "supabase":
+            print("Resetting Supabase store...")
+            result = reset_supabase()
+            print(f"Reset complete: {result}")
+        else:
+            print("Resetting v2 collection and docstore...")
+            reset_v2_collection(settings)
+            print("Reset complete.")
 
     source_dir = Path(args.source_dir) if args.source_dir else None
 
     print("\n=== Starting V2 Ingestion ===")
+    print(f"Target: {args.target}")
     print(f"Source: {source_dir or settings.transcript_source_dir}")
     print(f"Force re-index: {args.force or args.reset}")
     print(f"Embedding model: {settings.voyage_embedding_model}")
@@ -373,6 +454,7 @@ def main():
             source_dir=source_dir,
             force=args.force or args.reset,
             progress_callback=progress_callback,
+            target=args.target,
         )
 
         print("\n\n=== V2 Ingestion Complete ===")

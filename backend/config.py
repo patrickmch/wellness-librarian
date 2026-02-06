@@ -73,10 +73,32 @@ class Settings(BaseSettings):
     enable_critic: bool = True  # Verify responses against sources
     critic_model: str = "claude-3-5-haiku-20241022"  # Fast model for verification
 
+    # Supabase settings (for pgvector storage)
+    supabase_url: str = ""  # e.g., https://xxx.supabase.co
+    supabase_key: str = ""  # anon/service key
+    supabase_db_url: str = ""  # Direct postgres connection for bulk ops
+
+    # Storage backend: "sqlite" for local, "supabase" for production
+    store_backend: Literal["sqlite", "supabase"] = "sqlite"
+
+    # Video sync settings
+    vimeo_access_token: str = ""  # Vimeo API access token
+    youtube_channel_url: str = ""  # YouTube channel URL for sync (e.g., https://www.youtube.com/@ChannelName)
+    youtube_playlist_ids: str = ""  # Comma-separated playlist IDs (optional, alternative to channel)
+    sync_enabled: bool = True  # Enable/disable video sync
+    sync_transcript_dir: Path = Path(__file__).parent.parent / "data/transcripts"  # Where to store downloaded VTTs
+
     # Server settings
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+
+    @property
+    def youtube_playlist_list(self) -> list[str]:
+        """Parse comma-separated playlist IDs into list."""
+        if not self.youtube_playlist_ids:
+            return []
+        return [p.strip() for p in self.youtube_playlist_ids.split(",") if p.strip()]
 
     @property
     def chroma_collection_name(self) -> str:

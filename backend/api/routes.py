@@ -181,9 +181,15 @@ async def list_sources():
     Returns information about the indexed transcript library (v2 enhanced index).
     """
     try:
-        # Use v2 docstore stats for accurate counts
-        docstore = get_docstore()
-        stats = docstore.get_stats()
+        settings = get_settings()
+
+        if settings.store_backend == "supabase":
+            from backend.rag.stores.supabase_store import get_supabase_store
+            store = get_supabase_store()
+            stats = store.get_stats()
+        else:
+            docstore = get_docstore()
+            stats = docstore.get_stats()
 
         return SourcesResponse(
             total_videos=stats.get("unique_videos", 0),
@@ -281,17 +287,30 @@ async def submit_feedback(request: FeedbackRequest):
     """
     Submit user feedback (thumbs up/down) for a response.
 
-    Stores feedback in SQLite for analytics and improvement tracking.
+    Stores feedback in the configured backend (SQLite or Supabase).
     """
     try:
-        docstore = get_docstore()
-        feedback_id = docstore.add_feedback(
-            message_id=request.message_id,
-            feedback_type=request.feedback_type,
-            session_id=request.session_id,
-            query=request.query,
-            parent_ids=request.parent_ids,
-        )
+        settings = get_settings()
+
+        if settings.store_backend == "supabase":
+            from backend.rag.stores.supabase_store import get_supabase_store
+            store = get_supabase_store()
+            feedback_id = store.add_feedback(
+                message_id=request.message_id,
+                feedback_type=request.feedback_type,
+                session_id=request.session_id,
+                query=request.query,
+                parent_ids=request.parent_ids,
+            )
+        else:
+            docstore = get_docstore()
+            feedback_id = docstore.add_feedback(
+                message_id=request.message_id,
+                feedback_type=request.feedback_type,
+                session_id=request.session_id,
+                query=request.query,
+                parent_ids=request.parent_ids,
+            )
 
         return FeedbackResponse(
             status="ok",

@@ -6,17 +6,18 @@ Implements the parent-child retrieval strategy:
 2. Expand to parent chunks for context
 3. Apply diversity filtering
 4. Rerank for final ordering
+
+Supports two storage backends:
+- SQLite + ChromaDB (legacy, for local development)
+- Supabase with pgvector (production, unified storage)
 """
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
-
-import chromadb
+from typing import Optional, Protocol, runtime_checkable
 
 from backend.config import get_settings
 from backend.rag.chunking.models import ParentChunk, ChildChunk
-from backend.rag.docstore.sqlite_store import SQLiteDocStore, get_docstore
 from backend.rag.providers.voyage_provider import VoyageEmbeddingProvider
 from backend.rag.reranking.voyage_reranker import VoyageReranker
 from backend.rag.retrieval.diversity import apply_diversity_filters
@@ -110,7 +111,7 @@ class ParentChildRetriever:
 
     Strategy:
     1. Embed query with Voyage (query mode)
-    2. Search ChromaDB for top-N child chunks
+    2. Search for top-N child chunks (ChromaDB or Supabase)
     3. Apply per-video diversity filter to children
     4. Expand to unique parent chunks
     5. Rerank parents with Voyage rerank-2
@@ -121,14 +122,17 @@ class ParentChildRetriever:
     - Context: Parent chunks provide full comprehension
     - Diversity: Per-video limits prevent single-source domination
     - Quality: Reranking improves final relevance ordering
+
+    Supports two backends:
+    - "sqlite": ChromaDB for children, SQLite for parents (local dev)
+    - "supabase": Supabase pgvector for all data (production)
     """
 
     def __init__(
         self,
         embedding_provider: VoyageEmbeddingProvider | None = None,
         reranker: VoyageReranker | None = None,
-        docstore: SQLiteDocStore | None = None,
-        collection_name: str | None = None,
+        backend: str | None = None,
     ):
         """
         Initialize the parent-child retriever.
@@ -136,20 +140,21 @@ class ParentChildRetriever:
         Args:
             embedding_provider: Voyage embedding provider (default: create new)
             reranker: Voyage reranker (default: create new)
-            docstore: SQLite document store (default: singleton)
-            collection_name: ChromaDB collection name (default from settings)
+            backend: "sqlite" or "supabase" (default from settings.store_backend)
         """
         settings = get_settings()
 
         # Initialize components (lazy if possible)
         self._embedding_provider = embedding_provider
         self._reranker = reranker
-        self._docstore = docstore or get_docstore()
-        self._collection_name = collection_name or settings.chroma_collection_v2
+        self._backend = backend or settings.store_backend
 
-        # ChromaDB client (lazy init)
-        self._chroma_client: chromadb.PersistentClient | None = None
-        self._collection: chromadb.Collection | None = None
+        # Backend-specific initialization (lazy)
+        self._supabase_store = None
+        self._docstore = None
+        self._chroma_client = None
+        self._collection = None
+        self._collection_name = settings.chroma_collection_v2
 
     def _get_embedding_provider(self) -> VoyageEmbeddingProvider:
         """Get or create embedding provider."""
@@ -163,9 +168,24 @@ class ParentChildRetriever:
             self._reranker = VoyageReranker()
         return self._reranker
 
-    def _get_collection(self) -> chromadb.Collection:
-        """Get or create ChromaDB collection."""
+    def _get_supabase_store(self):
+        """Get or create Supabase store."""
+        if self._supabase_store is None:
+            from backend.rag.stores.supabase_store import get_supabase_store
+            self._supabase_store = get_supabase_store()
+        return self._supabase_store
+
+    def _get_docstore(self):
+        """Get or create SQLite docstore (for sqlite backend)."""
+        if self._docstore is None:
+            from backend.rag.docstore.sqlite_store import get_docstore
+            self._docstore = get_docstore()
+        return self._docstore
+
+    def _get_collection(self):
+        """Get or create ChromaDB collection (for sqlite backend)."""
         if self._collection is None:
+            import chromadb
             settings = get_settings()
             self._chroma_client = chromadb.PersistentClient(
                 path=str(settings.chroma_persist_dir),
@@ -213,66 +233,45 @@ class ParentChildRetriever:
         embedding_provider = self._get_embedding_provider()
         query_embedding = embedding_provider.embed_query(query)
 
-        # Step 2: Search children in ChromaDB
-        collection = self._get_collection()
-
-        where_filter = None
-        if category:
-            where_filter = {"category": category}
-
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=child_top_k,
-            where=where_filter,
-            include=["documents", "metadatas", "distances", "embeddings"],
-        )
-
-        # Flatten results (ChromaDB returns nested lists)
-        if not results["ids"] or not results["ids"][0]:
-            return ParentRetrievalResponse(
-                query=query,
-                results=[],
-                total_results=0,
-                children_searched=0,
-                parents_expanded=0,
+        # Step 2: Search children (backend-specific)
+        if self._backend == "supabase":
+            children_with_scores, child_count = self._search_children_supabase(
+                query_embedding, child_top_k, category, min_score
             )
-
-        child_ids = results["ids"][0]
-        child_docs = results["documents"][0]
-        child_metas = results["metadatas"][0]
-        child_distances = results["distances"][0]
-        child_embeddings = results["embeddings"][0] if results.get("embeddings") is not None else None
-
-        # Convert to ChildChunk objects with scores
-        children_with_scores = []
-        for i, (doc, meta, dist) in enumerate(zip(child_docs, child_metas, child_distances)):
-            score = 1.0 - dist  # Convert distance to similarity
-            if score >= min_score:
-                child = ChildChunk.from_chroma_result(doc, meta)
-                embedding = child_embeddings[i] if child_embeddings is not None else None
-                children_with_scores.append((child, score, embedding))
+        else:
+            children_with_scores, child_count = self._search_children_chroma(
+                query_embedding, child_top_k, category, min_score
+            )
 
         if not children_with_scores:
             return ParentRetrievalResponse(
                 query=query,
                 results=[],
                 total_results=0,
-                children_searched=len(child_ids),
+                children_searched=child_count,
                 parents_expanded=0,
             )
 
         # Step 3: Apply diversity filter to children
+        # Extract embeddings for MMR (if available)
+        has_embeddings = children_with_scores[0][2] is not None
         filtered_children = apply_diversity_filters(
             children_with_scores,
             query_embedding=query_embedding,
             video_id_getter=lambda x: x[0].video_id,
             embedding_getter=lambda x: x[2] if x[2] is not None else query_embedding,
-            use_mmr=settings.enable_mmr and child_embeddings is not None,
+            use_mmr=settings.enable_mmr and has_embeddings,
         )
 
-        # Step 4: Expand to unique parents
+        # Step 4: Expand to unique parents (backend-specific)
         parent_ids = list(set(child[0].parent_id for child in filtered_children))
-        parents = self._docstore.get_batch(parent_ids)
+
+        if self._backend == "supabase":
+            store = self._get_supabase_store()
+            parents = store.get_parent_batch(parent_ids)
+        else:
+            docstore = self._get_docstore()
+            parents = docstore.get_batch(parent_ids)
 
         if not parents:
             logger.warning(f"No parents found for IDs: {parent_ids[:5]}...")
@@ -280,7 +279,7 @@ class ParentChildRetriever:
                 query=query,
                 results=[],
                 total_results=0,
-                children_searched=len(child_ids),
+                children_searched=child_count,
                 parents_expanded=0,
             )
 
@@ -337,24 +336,105 @@ class ParentChildRetriever:
             query=query,
             results=final_results,
             total_results=len(final_results),
-            children_searched=len(child_ids),
+            children_searched=child_count,
             parents_expanded=len(parents),
         )
+
+    def _search_children_supabase(
+        self,
+        query_embedding: list[float],
+        top_k: int,
+        category: str | None,
+        min_score: float,
+    ) -> tuple[list[tuple[ChildChunk, float, list[float] | None]], int]:
+        """Search children using Supabase pgvector."""
+        store = self._get_supabase_store()
+        settings = get_settings()
+
+        results = store.search_children(
+            query_embedding=query_embedding,
+            top_k=top_k,
+            category=category,
+            include_embeddings=settings.enable_mmr,
+        )
+
+        children_with_scores = []
+        for r in results:
+            if r.score >= min_score:
+                child = r.to_child_chunk()
+                children_with_scores.append((child, r.score, r.embedding))
+
+        return children_with_scores, len(results)
+
+    def _search_children_chroma(
+        self,
+        query_embedding: list[float],
+        top_k: int,
+        category: str | None,
+        min_score: float,
+    ) -> tuple[list[tuple[ChildChunk, float, list[float] | None]], int]:
+        """Search children using ChromaDB."""
+        collection = self._get_collection()
+
+        where_filter = None
+        if category:
+            where_filter = {"category": category}
+
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where_filter,
+            include=["documents", "metadatas", "distances", "embeddings"],
+        )
+
+        # Handle empty results
+        if not results["ids"] or not results["ids"][0]:
+            return [], 0
+
+        child_ids = results["ids"][0]
+        child_docs = results["documents"][0]
+        child_metas = results["metadatas"][0]
+        child_distances = results["distances"][0]
+        child_embeddings = results["embeddings"][0] if results.get("embeddings") is not None else None
+
+        children_with_scores = []
+        for i, (doc, meta, dist) in enumerate(zip(child_docs, child_metas, child_distances)):
+            score = 1.0 - dist  # Convert distance to similarity
+            if score >= min_score:
+                child = ChildChunk.from_chroma_result(doc, meta)
+                embedding = child_embeddings[i] if child_embeddings is not None else None
+                children_with_scores.append((child, score, embedding))
+
+        return children_with_scores, len(child_ids)
 
     def get_stats(self) -> dict:
         """Get retriever statistics."""
         settings = get_settings()
 
-        try:
-            collection = self._get_collection()
-            child_count = collection.count()
-        except Exception:
-            child_count = 0
+        if self._backend == "supabase":
+            try:
+                store = self._get_supabase_store()
+                store_stats = store.get_stats()
+                child_count = store_stats.get("child_chunks_indexed", 0)
+            except Exception:
+                store_stats = {}
+                child_count = 0
+        else:
+            try:
+                collection = self._get_collection()
+                child_count = collection.count()
+            except Exception:
+                child_count = 0
 
-        docstore_stats = self._docstore.get_stats()
+            try:
+                docstore = self._get_docstore()
+                store_stats = docstore.get_stats()
+            except Exception:
+                store_stats = {}
 
         return {
             "retriever": "parent_child",
+            "backend": self._backend,
             "embedding_provider": "voyage",
             "embedding_model": settings.voyage_embedding_model,
             "reranking_enabled": settings.enable_reranking,
@@ -363,7 +443,7 @@ class ParentChildRetriever:
             "mmr_enabled": settings.enable_mmr,
             "mmr_lambda": settings.mmr_lambda,
             "child_chunks_indexed": child_count,
-            **docstore_stats,
+            **store_stats,
         }
 
 

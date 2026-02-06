@@ -1,4 +1,8 @@
 # Wellness Librarian - Production Dockerfile
+#
+# Supports two storage backends:
+# - SQLite + ChromaDB (local development, requires volume mount)
+# - Supabase with pgvector (production, no volume needed)
 
 FROM python:3.12-slim
 
@@ -16,6 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -29,25 +34,16 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 
-# Copy data to SEED directory (not the mount point)
-# This allows volume seeding on first deploy
-COPY data/ ./data-seed/
-
-# Create empty data directory (volume will mount here)
-RUN mkdir -p ./data
-
-# Make init script executable
-RUN chmod +x ./scripts/init-data.sh
+# For SQLite/ChromaDB fallback (local development)
+# Production with Supabase doesn't need this data
+COPY data/ ./data/
 
 # Expose port (Railway will override with $PORT)
 EXPOSE ${PORT}
 
-# Health check using curl (more reliable in containers)
+# Health check using curl
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:${PORT}/api/health || exit 1
 
-# Use init script as entrypoint (seeds volume if empty, then runs CMD)
-ENTRYPOINT ["./scripts/init-data.sh"]
-
-# Default command (init script handles PORT variable)
-CMD []
+# Run the application directly (no init script needed with Supabase)
+CMD uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}
