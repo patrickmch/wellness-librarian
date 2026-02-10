@@ -17,6 +17,7 @@ build/
 
 # Data (too large for GitHub - build locally, deploy via Docker)
 data/
+data-backup/
 *.db
 
 # IDE
