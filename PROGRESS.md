@@ -2,8 +2,8 @@
 
 ## Current Status
 
-**Phase:** Incremental Video Sync Ready 🚀
-**Last Updated:** 2026-02-06
+**Phase:** Deployed to Production 🚀
+**Last Updated:** 2026-02-10
 
 ### Session Context (for resuming)
 
@@ -17,7 +17,23 @@
 - System prompt updated to handle content/intent mismatch (e.g., specific thyroid content for general weight loss queries)
 - Multi-turn conversation history: Client-side history sent with each request for context continuity
 - Supabase pgvector backend - Unified Postgres storage replaces ChromaDB + SQLite
-- **NEW: Incremental Video Sync Pipeline** - Automated discovery and ingestion from Vimeo/YouTube with tracking
+- Incremental Video Sync Pipeline - Automated discovery and ingestion from Vimeo/YouTube with tracking
+- **DEPLOYED: Railway production with Supabase backend** - https://wellness-librarian-production.up.railway.app
+
+### Production Deployment (2026-02-10) ✅
+
+**URL:** https://wellness-librarian-production.up.railway.app
+**Backend:** Supabase pgvector (transaction pooler)
+**Pipeline:** Enhanced (parent-child retrieval + Voyage reranking + Haiku critic)
+**Data:** 195 videos, 2,424 parent chunks, 17 categories
+
+**Fixes applied for deployment:**
+- Dockerfile: `COPY data/` → `RUN mkdir -p ./data/chroma_db` (data/ is gitignored)
+- main.py: Backend-aware startup (Supabase vs ChromaDB)
+- routes.py: Health check reports correct chunk count per backend
+- .env: Supabase DB URL updated to transaction pooler (`aws-1-us-east-1.pooler.supabase.com:6543`)
+
+**Key lesson:** Supabase free-tier direct DB connections (`db.*.supabase.co`) don't resolve via IPv4. Must use the transaction pooler URL instead.
 
 **Current tuning parameters:**
 ```python
