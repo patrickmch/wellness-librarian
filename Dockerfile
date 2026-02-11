@@ -34,9 +34,9 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 
-# For SQLite/ChromaDB fallback (local development)
-# Production with Supabase doesn't need this data
-COPY data/ ./data/
+# Create data directory for SQLite/ChromaDB fallback (local development)
+# Production with Supabase doesn't need seeded data, but the directory must exist
+RUN mkdir -p ./data/chroma_db
 
 # Expose port (Railway will override with $PORT)
 EXPOSE ${PORT}

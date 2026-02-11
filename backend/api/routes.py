@@ -265,7 +265,15 @@ async def health_check():
     Returns service status and basic statistics.
     """
     try:
-        chunk_count = get_document_count()
+        settings = get_settings()
+
+        if settings.store_backend == "supabase":
+            from backend.rag.stores.supabase_store import get_supabase_store
+            store = get_supabase_store()
+            stats = store.get_stats()
+            chunk_count = stats.get("total_parent_chunks", 0)
+        else:
+            chunk_count = get_document_count()
 
         return HealthResponse(
             status="healthy",
