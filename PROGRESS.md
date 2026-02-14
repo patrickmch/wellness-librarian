@@ -35,6 +35,12 @@
 
 **Key lesson:** Supabase free-tier direct DB connections (`db.*.supabase.co`) don't resolve via IPv4. Must use the transaction pooler URL instead.
 
+### What's Next
+- **Run first video sync** against live Vimeo/YouTube channels: `python scripts/sync_videos.py --dry-run`
+- **Rotate API keys** — Anthropic, OpenAI, Voyage keys were exposed in a conversation session
+- **Optional enhancements:** Category-based filtering, query intent classification, feedback-driven learning
+- **Admin API key** — `ADMIN_API_KEY` is still `dev-admin-key` in Railway; generate a real one for production
+
 **Current tuning parameters:**
 ```python
 # backend/config.py
