@@ -21,6 +21,39 @@
 - **DEPLOYED: Railway production with Supabase backend** - https://wellness-librarian-production.up.railway.app
 - Transcript → Video Recommendation endpoint (`POST /api/recommend`)
 - Updated Haiku model ID from deprecated `claude-3-5-haiku-20241022` → `claude-haiku-4-5-20251001`
+- Community Post Generator endpoint (`POST /api/community-post`)
+
+### Community Post Generator (2026-02-24) ✅
+
+**Endpoint:** `POST /api/community-post` (admin-protected)
+**Purpose:** Generate engaging WhatsApp posts featuring videos from Christine's library for Patrick's wellness community.
+
+**Pipeline:** Random video → fetch content preview → Haiku generation → deep-link URL
+**Cost:** ~$0.002/post (~$0.06/month at 1/day)
+
+**Three post formats:**
+| Format | Tone | Use |
+|--------|------|-----|
+| `spotlight` | Discovery — "Have you seen this gem?" | Warm intro + why it's worth watching |
+| `tip` | Practical — actionable wellness insight | One specific takeaway + source video |
+| `discussion` | Engagement — thought-provoking question | Reflection prompt + mention of video |
+
+**Repeat avoidance:** Caller passes `exclude_video_ids` (no server-side history — keeps API stateless).
+
+**Files created/modified:**
+```
+NEW: backend/rag/pipelines/community_post.py  # Pipeline implementation
+MOD: backend/rag/stores/supabase_store.py      # get_random_video_id()
+MOD: backend/rag/docstore/sqlite_store.py      # get_random_video_id()
+MOD: backend/api/models.py                     # CommunityPostRequest/Response
+MOD: backend/api/routes.py                     # POST /api/community-post route
+```
+
+**Design decisions:**
+- **43. Single Haiku call:** Unlike /recommend (multi-query + dedup), community posts only need one video and one generation call — keep it cheap and fast.
+- **44. No server-side history:** Repeat avoidance is the caller's responsibility via `exclude_video_ids`. Avoids a migration and keeps the API stateless.
+- **45. Random video via GROUP BY:** Uses `GROUP BY ... ORDER BY RANDOM() LIMIT 1` in both Postgres and SQLite for unbiased video selection.
+- **46. Format-specific prompts:** Each format (spotlight/tip/discussion) has its own prompt template to ensure tonal variety.
 
 ### Production Deployment (2026-02-10) ✅
 
@@ -1064,6 +1097,7 @@ railway redeploy
 | `/api/sources` | GET | List categories | - |
 | `/api/feedback` | POST | Submit thumbs up/down | - |
 | `/api/recommend` | POST | Transcript → video recommendations | Admin |
+| `/api/community-post` | POST | Generate WhatsApp community post | Admin |
 | `/api/ingest` | POST | Add transcript | Admin |
 | `/api/health` | GET | Health check | - |
 

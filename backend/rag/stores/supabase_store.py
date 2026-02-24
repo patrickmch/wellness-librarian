@@ -648,6 +648,61 @@ class SupabaseStore:
         }
 
     # -------------------------------------------------------------------------
+    # Random Video Selection
+    # -------------------------------------------------------------------------
+
+    def get_random_video_id(
+        self,
+        category: str | None = None,
+        exclude_video_ids: list[str] | None = None,
+    ) -> dict | None:
+        """
+        Pick a random video, optionally filtered by category and exclusions.
+
+        Returns:
+            Dict with video_id, title, category, video_url, source
+            or None if no matching video exists.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                conditions = []
+                params: list = []
+
+                if category:
+                    conditions.append("category = %s")
+                    params.append(category)
+
+                if exclude_video_ids:
+                    conditions.append("video_id != ALL(%s)")
+                    params.append(exclude_video_ids)
+
+                where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+                cur.execute(
+                    f"""
+                    SELECT video_id, title, category, video_url, source
+                    FROM parent_chunks
+                    {where}
+                    GROUP BY video_id, title, category, video_url, source
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                    """,
+                    params,
+                )
+                row = cur.fetchone()
+
+                if not row:
+                    return None
+
+                return {
+                    "video_id": row["video_id"],
+                    "title": row["title"],
+                    "category": row["category"],
+                    "video_url": row["video_url"],
+                    "source": row.get("source", "vimeo"),
+                }
+
+    # -------------------------------------------------------------------------
     # Statistics and Management
     # -------------------------------------------------------------------------
 

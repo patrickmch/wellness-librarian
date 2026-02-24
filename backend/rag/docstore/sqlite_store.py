@@ -347,6 +347,56 @@ class SQLiteDocStore:
             cursor = conn.execute("DELETE FROM parent_chunks")
             return cursor.rowcount
 
+    def get_random_video_id(
+        self,
+        category: str | None = None,
+        exclude_video_ids: list[str] | None = None,
+    ) -> dict | None:
+        """
+        Pick a random video, optionally filtered by category and exclusions.
+
+        Returns:
+            Dict with video_id, title, category, video_url, source
+            or None if no matching video exists.
+        """
+        conditions = []
+        params: list = []
+
+        if category:
+            conditions.append("category = ?")
+            params.append(category)
+
+        if exclude_video_ids:
+            placeholders = ",".join("?" * len(exclude_video_ids))
+            conditions.append(f"video_id NOT IN ({placeholders})")
+            params.extend(exclude_video_ids)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                f"""
+                SELECT video_id, title, category, video_url, source
+                FROM parent_chunks
+                {where}
+                GROUP BY video_id, title, category, video_url, source
+                ORDER BY RANDOM()
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "video_id": row["video_id"],
+                "title": row["title"],
+                "category": row["category"],
+                "video_url": row["video_url"],
+                "source": row["source"],
+            }
+
     def add_feedback(
         self,
         message_id: str,

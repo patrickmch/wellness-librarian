@@ -2,7 +2,7 @@
 Pydantic models for API request/response schemas.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -51,6 +51,17 @@ class RecommendRequest(BaseModel):
     num_themes: int = Field(
         4, ge=2, le=6,
         description="Number of themes to extract and query",
+    )
+
+
+class CommunityPostRequest(BaseModel):
+    """Request body for community post generation endpoint."""
+    post_format: Literal["spotlight", "tip", "discussion"] = Field(
+        "spotlight", description="Post format: spotlight, tip, or discussion"
+    )
+    category: Optional[str] = Field(None, description="Filter to a specific category")
+    exclude_video_ids: list[str] = Field(
+        default_factory=list, description="Video IDs to exclude (recently used)"
     )
 
 
@@ -185,3 +196,14 @@ class RecommendResponse(BaseModel):
     themes: list[ThemeExtracted]
     total_videos_searched: int
     pipeline_used: str = "enhanced"
+
+
+class CommunityPostResponse(BaseModel):
+    """Response body for community post generation endpoint."""
+    post: str = Field(..., description="WhatsApp message body (under 500 chars)")
+    video_id: str
+    video_title: str
+    video_url: str = Field(..., description="Deep-linked URL with timestamp")
+    start_time_seconds: int
+    category: str
+    post_format: str

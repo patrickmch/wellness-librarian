@@ -30,6 +30,8 @@ from backend.api.models import (
     RecommendResponse,
     VideoRecommendation,
     ThemeExtracted,
+    CommunityPostRequest,
+    CommunityPostResponse,
 )
 from backend.rag.docstore.sqlite_store import get_docstore
 from backend.rag.pipelines import (
@@ -393,4 +395,50 @@ async def recommend_from_transcript(
 
     except Exception as e:
         logger.exception("Error in recommend endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/community-post",
+    response_model=CommunityPostResponse,
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+async def generate_community_post(
+    request: CommunityPostRequest,
+    _: str = Depends(verify_admin_key),
+):
+    """
+    Generate a WhatsApp community post featuring a random video.
+
+    Picks a random video from the library (with optional category filter
+    and exclusion list), generates an engaging post using Haiku, and
+    returns the post with a deep-linked video URL.
+
+    Requires admin API key in X-Admin-Key header.
+    """
+    try:
+        from backend.rag.pipelines.community_post import (
+            generate_community_post as _generate,
+        )
+
+        result = await _generate(
+            post_format=request.post_format,
+            category=request.category,
+            exclude_video_ids=request.exclude_video_ids,
+        )
+
+        return CommunityPostResponse(
+            post=result.post,
+            video_id=result.video_id,
+            video_title=result.video_title,
+            video_url=result.video_url,
+            start_time_seconds=result.start_time_seconds,
+            category=result.category,
+            post_format=result.post_format,
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Error in community-post endpoint")
         raise HTTPException(status_code=500, detail=str(e))
