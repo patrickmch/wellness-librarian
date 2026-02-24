@@ -36,6 +36,24 @@ class IngestRequest(BaseModel):
     force: bool = Field(False, description="Replace if exists")
 
 
+class RecommendRequest(BaseModel):
+    """Request body for transcript recommendation endpoint."""
+    transcript: str = Field(
+        ...,
+        min_length=50,
+        max_length=50_000,
+        description="Call transcript or summary text",
+    )
+    num_recommendations: int = Field(
+        3, ge=1, le=5,
+        description="Number of video recommendations to return",
+    )
+    num_themes: int = Field(
+        4, ge=2, le=6,
+        description="Number of themes to extract and query",
+    )
+
+
 class FeedbackRequest(BaseModel):
     """Request body for feedback endpoint."""
     message_id: str = Field(..., description="ID of the message being rated")
@@ -137,3 +155,33 @@ class FeedbackResponse(BaseModel):
     """Response body for feedback endpoint."""
     status: str
     feedback_id: str
+
+
+# === Recommendation Models ===
+
+class VideoRecommendation(BaseModel):
+    """A single curated video recommendation."""
+    rank: int
+    title: str
+    category: str
+    video_url: str
+    start_time_seconds: int = 0
+    relevance: str
+    themes_matched: list[str]
+    source: str = ""
+    excerpt: Optional[str] = None
+
+
+class ThemeExtracted(BaseModel):
+    """A theme extracted from the transcript."""
+    theme: str
+    query: str
+    videos_found: int = 0
+
+
+class RecommendResponse(BaseModel):
+    """Response body for recommend endpoint."""
+    recommendations: list[VideoRecommendation]
+    themes: list[ThemeExtracted]
+    total_videos_searched: int
+    pipeline_used: str = "enhanced"

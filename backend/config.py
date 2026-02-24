@@ -71,7 +71,7 @@ class Settings(BaseSettings):
 
     # Critic/verification settings
     enable_critic: bool = True  # Verify responses against sources
-    critic_model: str = "claude-3-5-haiku-20241022"  # Fast model for verification
+    critic_model: str = "claude-haiku-4-5-20251001"  # Fast model for verification
 
     # Supabase settings (for pgvector storage)
     supabase_url: str = ""  # e.g., https://xxx.supabase.co

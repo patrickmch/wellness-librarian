@@ -3,7 +3,7 @@
 ## Current Status
 
 **Phase:** Deployed to Production 🚀
-**Last Updated:** 2026-02-10
+**Last Updated:** 2026-02-24
 
 ### Session Context (for resuming)
 
@@ -19,6 +19,8 @@
 - Supabase pgvector backend - Unified Postgres storage replaces ChromaDB + SQLite
 - Incremental Video Sync Pipeline - Automated discovery and ingestion from Vimeo/YouTube with tracking
 - **DEPLOYED: Railway production with Supabase backend** - https://wellness-librarian-production.up.railway.app
+- Transcript → Video Recommendation endpoint (`POST /api/recommend`)
+- Updated Haiku model ID from deprecated `claude-3-5-haiku-20241022` → `claude-haiku-4-5-20251001`
 
 ### Production Deployment (2026-02-10) ✅
 
@@ -40,6 +42,305 @@
 - **Rotate API keys** — Anthropic, OpenAI, Voyage keys were exposed in a conversation session
 - **Optional enhancements:** Category-based filtering, query intent classification, feedback-driven learning
 - **Admin API key** — `ADMIN_API_KEY` is still `dev-admin-key` in Railway; generate a real one for production
+- **Transcript Recommendation Feature** — See detailed design below
+
+---
+
+### Feature Proposal: Transcript → Video Recommendations (2026-02-20)
+
+**Status:** Built and tested locally (2026-02-24)
+**Validated:** Workflow tested manually via Claude as intermediary (2026-02-19)
+
+#### Problem
+
+After 1-on-1 calls with community members, Patrick wants to send 3 curated video
+recommendations from Christine's library based on what was discussed. Currently this
+requires manually recalling which videos match — the RAG system can do it better.
+
+#### How It Was Validated
+
+Claude acted as the intermediary for a real call with V.A. Lytle:
+1. Analyzed the Gemini transcript summary
+2. Extracted 4 themes: reframing aging, meditation/mindfulness, healthy aging, science behind "woo woo"
+3. Ran 4 parallel queries against `POST /api/chat` (production)
+4. Collected 32 source videos, deduplicated, ranked by cross-query reinforcement + relevance
+5. Selected top 3 with rationale, timestamps, and deep-links
+
+**Key finding:** Multi-query with deduplication works significantly better than a single
+query. Videos that appear across multiple theme queries are reliably the most relevant.
+
+#### Proposed Endpoint
+
+```
+POST /api/recommend
+```
+
+**Auth:** Admin-protected (same `X-Admin-Key` header as `/api/ingest`)
+
+#### Request Model
+
+```python
+class RecommendRequest(BaseModel):
+    """Request body for transcript recommendation endpoint."""
+    transcript: str = Field(
+        ...,
+        min_length=50,
+        max_length=50_000,
+        description="Call transcript or summary text"
+    )
+    num_recommendations: int = Field(
+        3, ge=1, le=5,
+        description="Number of video recommendations to return"
+    )
+    num_themes: int = Field(
+        4, ge=2, le=6,
+        description="Number of themes to extract and query"
+    )
+```
+
+No `max_length=2000` limit like `/api/chat` — the transcript is processed server-side
+by Claude, not sent directly to the embedding model.
+
+#### Response Model
+
+```python
+class VideoRecommendation(BaseModel):
+    """A single curated video recommendation."""
+    rank: int                          # 1, 2, or 3
+    title: str                         # Video title
+    category: str                      # e.g. "Wellness Evolution Community"
+    video_url: str                     # Full URL with timestamp
+    start_time_seconds: int            # Deep-link timestamp
+    relevance: str                     # 2-3 sentence explanation of why this matches
+    themes_matched: list[str]          # Which extracted themes this video matched
+    source: str                        # "youtube" or "vimeo"
+    excerpt: Optional[str] = None      # Key transcript excerpt
+
+class ThemeExtracted(BaseModel):
+    """A theme extracted from the transcript."""
+    theme: str                         # Short label, e.g. "Reframing Aging"
+    query: str                         # The RAG query generated for this theme
+    videos_found: int                  # How many unique videos matched
+
+class RecommendResponse(BaseModel):
+    """Response body for recommend endpoint."""
+    recommendations: list[VideoRecommendation]
+    themes: list[ThemeExtracted]
+    total_videos_searched: int         # Total unique videos across all queries
+    pipeline_used: str = "enhanced"
+```
+
+#### Pipeline Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  POST /api/recommend                                         │
+│  { transcript: "..." }                                       │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Step 1: THEME EXTRACTION (Claude Haiku)                     │
+│                                                              │
+│  System: "Extract 3-5 wellness themes from this transcript.  │
+│           Return as JSON array of {theme, query} objects."   │
+│                                                              │
+│  Input:  Full transcript text (up to 50k chars)              │
+│  Output: [                                                   │
+│    {"theme": "Reframing Aging",                              │
+│     "query": "How can I reframe my attitude about aging..."},│
+│    {"theme": "Meditation Basics", "query": "..."},           │
+│    ...                                                       │
+│  ]                                                           │
+│                                                              │
+│  Model: claude-3-5-haiku (fast, cheap — theme extraction     │
+│         doesn't need creative reasoning)                     │
+│  Cost:  ~$0.003/call                                         │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Step 2: PARALLEL RAG RETRIEVAL (existing pipeline)          │
+│                                                              │
+│  For each theme query, run:                                  │
+│    ParentChildRetriever.retrieve(query=theme.query)          │
+│                                                              │
+│  This reuses the full existing pipeline:                     │
+│    Voyage embed → pgvector search → diversity filter →       │
+│    parent expansion → Voyage rerank                          │
+│                                                              │
+│  Queries run via asyncio.gather() for parallelism.           │
+│  Each returns ~8 source videos.                              │
+│                                                              │
+│  Cost: 4 queries × ~$0.01 Voyage = ~$0.04                   │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Step 3: DEDUPLICATION + CROSS-QUERY SCORING                 │
+│                                                              │
+│  Collect all sources across queries into a single pool.      │
+│  For each unique video_id:                                   │
+│    - cross_query_count: How many theme queries returned it   │
+│    - best_rerank_score: Highest reranker score across queries│
+│    - themes_matched: Which themes it appeared under          │
+│                                                              │
+│  Score = cross_query_count * 2.0 + best_rerank_score         │
+│  (Videos appearing in multiple queries get a strong boost)   │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Step 4: TOP-N SELECTION + RELEVANCE GENERATION (Claude)     │
+│                                                              │
+│  Take the top N candidates by score.                         │
+│  Send to Claude with the original transcript summary:        │
+│                                                              │
+│  "Given this call transcript and these candidate videos,     │
+│   write a 2-3 sentence explanation of why each video is      │
+│   relevant to THIS specific person's situation."             │
+│                                                              │
+│  Model: claude-3-5-haiku (structured output)                 │
+│  Cost:  ~$0.005/call                                         │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Step 5: RESPONSE ASSEMBLY                                   │
+│                                                              │
+│  Return RecommendResponse with:                              │
+│    - 3 ranked recommendations with personalized relevance    │
+│    - Extracted themes for transparency                       │
+│    - Deep-link URLs with timestamps                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Files to Create/Modify
+
+```
+NEW FILES:
+backend/rag/pipelines/recommend.py     # Core recommendation pipeline
+                                       # - extract_themes() → Claude Haiku
+                                       # - parallel_retrieve() → asyncio.gather
+                                       # - deduplicate_and_rank()
+                                       # - generate_relevance() → Claude Haiku
+
+MODIFY:
+backend/api/models.py                  # Add RecommendRequest, RecommendResponse,
+                                       #     VideoRecommendation, ThemeExtracted
+backend/api/routes.py                  # Add POST /api/recommend route
+backend/config.py                      # Add recommend_* settings (optional)
+```
+
+**No changes needed to:** retrieval, embeddings, reranking, vector store, or critic.
+The recommendation pipeline *composes* existing components rather than modifying them.
+
+#### Theme Extraction Prompt
+
+```python
+THEME_EXTRACTION_PROMPT = """Analyze this call transcript and extract the {num_themes}
+most important wellness themes, health concerns, or topics discussed.
+
+For each theme, write a focused question (under 200 words) that could be asked to a
+wellness video library to find relevant educational content. The question should be
+specific enough to get good search results but broad enough to match multiple videos.
+
+Return as a JSON array:
+[
+  {{"theme": "Short Label", "query": "Focused question for the video library..."}},
+  ...
+]
+
+TRANSCRIPT:
+{transcript}"""
+```
+
+#### Design Decisions
+
+**36. Haiku for Theme Extraction:** Theme extraction is structured analysis, not
+creative — Haiku is fast (~0.5s) and cheap (~$0.003). No need for Sonnet/Opus here.
+
+**37. Parallel Retrieval via asyncio.gather:** The retriever is currently sync
+(psycopg2 is blocking), but we can run multiple retrievals concurrently using
+`asyncio.to_thread()` wrapping `retriever.retrieve()`. This keeps total retrieval
+time ~equal to a single query rather than N × single query.
+
+**38. Cross-Query Reinforcement Scoring:** A video that appears across multiple
+independent theme queries is almost certainly relevant. This signal is stronger than
+any single reranker score. Weighting: `cross_query_count * 2.0 + best_rerank_score`.
+
+**39. No Critic on Recommendations:** The critic verifies health *claims* in
+generated prose. Recommendations are curated selections with relevance explanations —
+no health claims to hallucinate. Skip the critic to save latency and cost.
+
+**40. Admin-Protected Endpoint:** Only Patrick (or an automated system) calls this
+endpoint, not end users. Protects against abuse of the multi-query pipeline which
+costs more per request (~$0.05 vs ~$0.01 for a single chat).
+
+**41. Transcript Size Limit (50k chars):** A 1-hour call transcript is typically
+~15-20k chars. 50k provides headroom for verbose transcripts or multiple calls
+without hitting Claude's context limits for theme extraction.
+
+**42. Cross-Platform Title Dedup:** Some videos exist on both YouTube and Vimeo
+with different video_ids. Deduplication normalizes titles (lowercase alphanumeric)
+to catch these duplicates and merge their cross-query scores.
+
+#### Cost Per Recommendation Request
+
+| Step | Model/Service | Est. Cost |
+|------|---------------|-----------|
+| Theme extraction | Haiku (~2k input, ~500 output tokens) | ~$0.003 |
+| Parallel retrieval (4×) | Voyage embed + rerank | ~$0.04 |
+| Relevance generation | Haiku (~3k input, ~300 output tokens) | ~$0.004 |
+| **Total per request** | | **~$0.05** |
+
+At ~10 calls/week, that's **~$2/month** additional cost.
+
+#### Example Usage
+
+```bash
+# With a transcript file
+curl -X POST https://wellness-librarian-production.up.railway.app/api/recommend \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: $ADMIN_API_KEY" \
+  -d '{
+    "transcript": "Patrick and V.A. discussed reframing aging...",
+    "num_recommendations": 3,
+    "num_themes": 4
+  }'
+```
+
+```json
+{
+  "recommendations": [
+    {
+      "rank": 1,
+      "title": "Navigating Perimenopause: Hormones, Stress, and Thriving in Midlife",
+      "category": "Wellness Evolution Community",
+      "video_url": "https://www.youtube.com/watch?v=zjypOhuB5FY&t=3176",
+      "start_time_seconds": 3176,
+      "relevance": "V.A. is working on reframing aging from discomfort to appreciation. This video directly addresses that shift, with Dr. Vandenberg describing aging as 'an honor' and a transition into wisdom — exactly the perspective shift V.A. is seeking.",
+      "themes_matched": ["Reframing Aging", "Healthy Aging"],
+      "source": "youtube"
+    },
+    ...
+  ],
+  "themes": [
+    {"theme": "Reframing Aging", "query": "How can I reframe...", "videos_found": 8},
+    {"theme": "Meditation Basics", "query": "What are the benefits...", "videos_found": 8},
+    ...
+  ],
+  "total_videos_searched": 24,
+  "pipeline_used": "enhanced"
+}
+```
+
+#### Future Extensions (not building now)
+
+- **Web UI:** Textarea on the frontend for pasting transcripts, renders recommendations as cards
+- **Email integration:** Auto-send recommendation email to community member after call
+- **Batch mode:** Process multiple transcripts (e.g., group session notes)
+- **Feedback loop:** Track which recommended videos members actually watch, use to improve ranking
 
 **Current tuning parameters:**
 ```python
@@ -762,6 +1063,7 @@ railway redeploy
 | `/api/search` | POST | Semantic search | - |
 | `/api/sources` | GET | List categories | - |
 | `/api/feedback` | POST | Submit thumbs up/down | - |
+| `/api/recommend` | POST | Transcript → video recommendations | Admin |
 | `/api/ingest` | POST | Add transcript | Admin |
 | `/api/health` | GET | Health check | - |
 

@@ -26,6 +26,10 @@ from backend.api.models import (
     PipelineMetadata,
     FeedbackRequest,
     FeedbackResponse,
+    RecommendRequest,
+    RecommendResponse,
+    VideoRecommendation,
+    ThemeExtracted,
 )
 from backend.rag.docstore.sqlite_store import get_docstore
 from backend.rag.pipelines import (
@@ -327,4 +331,66 @@ async def submit_feedback(request: FeedbackRequest):
 
     except Exception as e:
         logger.exception("Error in feedback endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/recommend",
+    response_model=RecommendResponse,
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+async def recommend_from_transcript(
+    request: RecommendRequest,
+    _: str = Depends(verify_admin_key),
+):
+    """
+    Generate video recommendations from a call transcript.
+
+    Analyzes the transcript to extract wellness themes, runs parallel
+    RAG queries, and returns curated video recommendations with
+    personalized relevance explanations.
+
+    Requires admin API key in X-Admin-Key header.
+    """
+    try:
+        from backend.rag.pipelines.recommend import generate_recommendations
+
+        result = await generate_recommendations(
+            transcript=request.transcript,
+            num_recommendations=request.num_recommendations,
+            num_themes=request.num_themes,
+        )
+
+        return RecommendResponse(
+            recommendations=[
+                VideoRecommendation(
+                    rank=r.rank,
+                    title=r.title,
+                    category=r.category,
+                    video_url=r.video_url,
+                    start_time_seconds=r.start_time_seconds,
+                    relevance=r.relevance,
+                    themes_matched=r.themes_matched,
+                    source=r.source,
+                    excerpt=r.excerpt,
+                )
+                for r in result.recommendations
+            ],
+            themes=[
+                ThemeExtracted(
+                    theme=t.theme,
+                    query=t.query,
+                    videos_found=sum(
+                        1 for r in result.recommendations
+                        if t.theme in r.themes_matched
+                    ),
+                )
+                for t in result.themes
+            ],
+            total_videos_searched=result.total_videos_searched,
+            pipeline_used="enhanced",
+        )
+
+    except Exception as e:
+        logger.exception("Error in recommend endpoint")
         raise HTTPException(status_code=500, detail=str(e))

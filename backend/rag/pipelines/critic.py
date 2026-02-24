@@ -112,7 +112,7 @@ async def verify_response_async(
 
         # Use haiku for speed and cost efficiency
         message = await client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model=settings.critic_model,
             max_tokens=2000,
             system=CRITIC_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
@@ -171,7 +171,7 @@ def verify_response(
         client = get_anthropic_client()
 
         message = client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model=settings.critic_model,
             max_tokens=2000,
             system=CRITIC_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
