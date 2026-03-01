@@ -206,6 +206,7 @@ class ParentChildRetriever:
         child_top_k: int | None = None,
         final_top_k: int | None = None,
         category: str | None = None,
+        source: str | None = None,
         min_score: float | None = None,
         enable_reranking: bool | None = None,
     ) -> ParentRetrievalResponse:
@@ -217,6 +218,7 @@ class ParentChildRetriever:
             child_top_k: Number of children to search (default from settings)
             final_top_k: Final number of parents to return (default from settings)
             category: Optional category filter
+            source: Optional source filter ("youtube" or "vimeo")
             min_score: Minimum similarity score (0-1)
             enable_reranking: Whether to rerank results (default from settings)
 
@@ -236,7 +238,7 @@ class ParentChildRetriever:
         # Step 2: Search children (backend-specific)
         if self._backend == "supabase":
             children_with_scores, child_count = self._search_children_supabase(
-                query_embedding, child_top_k, category, min_score
+                query_embedding, child_top_k, category, min_score, source=source
             )
         else:
             children_with_scores, child_count = self._search_children_chroma(
@@ -346,6 +348,7 @@ class ParentChildRetriever:
         top_k: int,
         category: str | None,
         min_score: float,
+        source: str | None = None,
     ) -> tuple[list[tuple[ChildChunk, float, list[float] | None]], int]:
         """Search children using Supabase pgvector."""
         store = self._get_supabase_store()
@@ -355,6 +358,7 @@ class ParentChildRetriever:
             query_embedding=query_embedding,
             top_k=top_k,
             category=category,
+            source=source,
             include_embeddings=settings.enable_mmr,
         )
 

@@ -207,3 +207,32 @@ class CommunityPostResponse(BaseModel):
     start_time_seconds: int
     category: str
     post_format: str
+
+
+# === Content Retrieval Models (for AI agent) ===
+
+class ContentRequest(BaseModel):
+    """Request body for content retrieval endpoint."""
+    query: str = Field(..., min_length=1, max_length=500, description="Topic to search for")
+    top_k: int = Field(5, ge=1, le=10, description="Number of content pieces to return")
+    category: Optional[str] = Field(None, description="Optional category filter")
+
+
+class ContentItem(BaseModel):
+    """A single content piece from the transcript library."""
+    video_title: str
+    video_url: str = Field(..., description="Direct YouTube link")
+    video_id: str
+    category: str
+    duration: Optional[str] = None
+    content: str = Field(..., description="Full parent chunk transcript text")
+    relevance_score: float
+    excerpt: Optional[str] = Field(None, description="Shorter snippet (first 500 chars)")
+
+
+class ContentResponse(BaseModel):
+    """Response body for content retrieval endpoint."""
+    query: str
+    results: list[ContentItem]
+    total_results: int
+    youtube_videos_available: int = Field(0, description="Total YouTube videos in library")

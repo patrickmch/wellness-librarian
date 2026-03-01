@@ -3,7 +3,7 @@
 ## Current Status
 
 **Phase:** Deployed to Production 🚀
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-03-01
 
 ### Session Context (for resuming)
 
@@ -22,6 +22,58 @@
 - Transcript → Video Recommendation endpoint (`POST /api/recommend`)
 - Updated Haiku model ID from deprecated `claude-3-5-haiku-20241022` → `claude-haiku-4-5-20251001`
 - Community Post Generator endpoint (`POST /api/community-post`)
+- YouTube SEO Title Proposal script (`scripts/propose_seo_titles.py`)
+- Content Retrieval API endpoint (`POST /api/content`) — pure retrieval for AI agent post creation
+
+### Content Retrieval API (2026-03-01) ✅
+
+**Endpoint:** `POST /api/content` (admin-protected)
+**Purpose:** Programmatic access to YouTube transcript content for an external AI agent that crafts social media posts.
+
+**Pipeline:** Query → Voyage embed → pgvector search (YouTube only) → diversity filter → parent expansion → rerank → return structured data
+**Cost:** ~$0.01/call (Voyage embed + rerank only, no LLM generation)
+
+**Key design:** No LLM calls — pure retrieval. The AI agent receives raw transcript chunks + video metadata and handles all creative work independently.
+
+**Files created/modified:**
+```
+NEW: backend/rag/pipelines/content_retrieval.py  # Retrieval pipeline (no LLM)
+MOD: backend/rag/stores/supabase_store.py        # source filter on search_children() + get_random_video_id()
+MOD: backend/rag/retrieval/parent_child.py       # source param propagation
+MOD: backend/api/models.py                       # ContentRequest/ContentItem/ContentResponse
+MOD: backend/api/routes.py                       # POST /api/content route
+```
+
+**Design decisions:**
+- **52. Source filter refactored:** `search_children()` was refactored from branching if/else (category) to dynamic WHERE clause building, making future filters trivial.
+- **53. YouTube-only hardcoded:** The pipeline locks `source="youtube"` — these are the free videos safe for public social media posts.
+- **54. No LLM generation:** Keeps endpoint fast (<2s), cheap ($0.01/call), and gives the calling agent full creative control.
+- **55. YouTube count in response:** `youtube_videos_available` gives the agent context about library size.
+
+### YouTube SEO Title Proposals (2026-02-24) ✅
+
+**Script:** `scripts/propose_seo_titles.py`
+**Purpose:** Analyze transcript content of ~119 YouTube videos and propose 3 SEO-optimized title alternatives per video, output as CSV for review.
+
+**Pipeline:** Fetch YouTube videos from Supabase → first 5 parent chunks as preview (~26% transcript coverage) → Haiku generates 3 titles + rationale → CSV output
+**Cost:** ~$0.35 for all 119 videos (1 Haiku call each)
+
+**Usage:**
+```bash
+python scripts/propose_seo_titles.py                    # All videos, stdout
+python scripts/propose_seo_titles.py -o seo_titles.csv  # Save to file
+python scripts/propose_seo_titles.py --dry-run           # Preview video list
+python scripts/propose_seo_titles.py --limit 5           # Test with 5 videos
+```
+
+**CSV columns:** `video_id, current_title, video_url, category, proposed_title_1, proposed_title_2, proposed_title_3, rationale`
+
+**Design decisions:**
+- **47. Proposal-only:** No YouTube API integration yet — Patrick reviews CSV first, then we add update capability later with proper credentials.
+- **48. Concurrent Haiku calls:** `asyncio.Semaphore(5)` limits to 5 inflight requests for throughput without hitting rate limits.
+- **49. Dual-backend support:** Works with both Supabase (production) and SQLite (local dev) via same config toggle.
+- **50. 5-chunk preview over 3:** Analysis showed first 3 chunks only cover ~15% of transcript for typical videos, missing key sub-topics. 5 chunks covers ~26% — enough to capture techniques/solutions that appear after the intro framing. Capped at 6,000 chars, ~$0.003/video.
+- **51. Evidence-based SEO prompt:** Prompt updated with 2025-2026 YouTube SEO research: 60-70 char targets (not 50-60), two-part colon/dash structure, numbers for +20-30% CTR, power words for engagement.
 
 ### Community Post Generator (2026-02-24) ✅
 
@@ -1098,6 +1150,7 @@ railway redeploy
 | `/api/feedback` | POST | Submit thumbs up/down | - |
 | `/api/recommend` | POST | Transcript → video recommendations | Admin |
 | `/api/community-post` | POST | Generate WhatsApp community post | Admin |
+| `/api/content` | POST | Retrieve YouTube transcript content for AI agent | Admin |
 | `/api/ingest` | POST | Add transcript | Admin |
 | `/api/health` | GET | Health check | - |
 

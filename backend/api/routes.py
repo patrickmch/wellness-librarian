@@ -32,6 +32,9 @@ from backend.api.models import (
     ThemeExtracted,
     CommunityPostRequest,
     CommunityPostResponse,
+    ContentRequest,
+    ContentItem,
+    ContentResponse,
 )
 from backend.rag.docstore.sqlite_store import get_docstore
 from backend.rag.pipelines import (
@@ -441,4 +444,47 @@ async def generate_community_post(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception("Error in community-post endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/content",
+    response_model=ContentResponse,
+    responses={401: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+)
+async def retrieve_content(
+    request: ContentRequest,
+    _: str = Depends(verify_admin_key),
+):
+    """
+    Retrieve transcript content from free YouTube videos for AI agent use.
+
+    Returns raw transcript chunks + video metadata for a given topic.
+    No LLM generation — pure retrieval. The calling agent handles
+    post creation independently.
+
+    Requires admin API key in X-Admin-Key header.
+    """
+    try:
+        from backend.rag.pipelines.content_retrieval import (
+            retrieve_content as _retrieve,
+        )
+
+        result = _retrieve(
+            query=request.query,
+            top_k=request.top_k,
+            category=request.category,
+        )
+
+        return ContentResponse(
+            query=result["query"],
+            results=[
+                ContentItem(**item) for item in result["results"]
+            ],
+            total_results=result["total_results"],
+            youtube_videos_available=result["youtube_videos_available"],
+        )
+
+    except Exception as e:
+        logger.exception("Error in content endpoint")
         raise HTTPException(status_code=500, detail=str(e))

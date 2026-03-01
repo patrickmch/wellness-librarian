@@ -490,6 +490,7 @@ class SupabaseStore:
         query_embedding: list[float],
         top_k: int = 30,
         category: str | None = None,
+        source: str | None = None,
         include_embeddings: bool = False,
     ) -> list[ChildSearchResult]:
         """
@@ -499,6 +500,7 @@ class SupabaseStore:
             query_embedding: Query vector (1024 dimensions for voyage-3)
             top_k: Number of results to return
             category: Optional category filter
+            source: Optional source filter ("youtube" or "vimeo")
             include_embeddings: Whether to return embedding vectors
 
         Returns:
@@ -506,39 +508,37 @@ class SupabaseStore:
         """
         embedding_col = ", embedding" if include_embeddings else ""
 
+        conditions = []
+        params: list = [str(query_embedding)]
+
+        if category:
+            conditions.append("category = %s")
+            params.append(category)
+
+        if source:
+            conditions.append("source = %s")
+            params.append(source)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        params.extend([str(query_embedding), top_k])
+
         with self._get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                if category:
-                    cur.execute(
-                        f"""
-                        SELECT
-                            child_id, parent_id, text, token_count,
-                            child_index, total_children, start_token, end_token,
-                            video_id, title, category, video_url, source,
-                            1 - (embedding <=> %s::vector) as score
-                            {embedding_col}
-                        FROM child_chunks
-                        WHERE category = %s
-                        ORDER BY embedding <=> %s::vector
-                        LIMIT %s
-                        """,
-                        (str(query_embedding), category, str(query_embedding), top_k)
-                    )
-                else:
-                    cur.execute(
-                        f"""
-                        SELECT
-                            child_id, parent_id, text, token_count,
-                            child_index, total_children, start_token, end_token,
-                            video_id, title, category, video_url, source,
-                            1 - (embedding <=> %s::vector) as score
-                            {embedding_col}
-                        FROM child_chunks
-                        ORDER BY embedding <=> %s::vector
-                        LIMIT %s
-                        """,
-                        (str(query_embedding), str(query_embedding), top_k)
-                    )
+                cur.execute(
+                    f"""
+                    SELECT
+                        child_id, parent_id, text, token_count,
+                        child_index, total_children, start_token, end_token,
+                        video_id, title, category, video_url, source,
+                        1 - (embedding <=> %s::vector) as score
+                        {embedding_col}
+                    FROM child_chunks
+                    {where}
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """,
+                    params,
+                )
 
                 rows = cur.fetchall()
 
@@ -655,9 +655,10 @@ class SupabaseStore:
         self,
         category: str | None = None,
         exclude_video_ids: list[str] | None = None,
+        source: str | None = None,
     ) -> dict | None:
         """
-        Pick a random video, optionally filtered by category and exclusions.
+        Pick a random video, optionally filtered by category, source, and exclusions.
 
         Returns:
             Dict with video_id, title, category, video_url, source
@@ -675,6 +676,10 @@ class SupabaseStore:
                 if exclude_video_ids:
                     conditions.append("video_id != ALL(%s)")
                     params.append(exclude_video_ids)
+
+                if source:
+                    conditions.append("source = %s")
+                    params.append(source)
 
                 where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
